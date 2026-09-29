@@ -30,7 +30,7 @@ def snapshot(items):
     return {item["_id"]: {key: item.get(key) for key in FIELDS} for item in items}
 
 
-async def run():
+async def run(*, disable_enable_authorized=False):
     entries = json.loads(Path("/config/.storage/core.config_entries").read_text())["data"]["entries"]
     active = [entry for entry in entries if entry["domain"] == "august" and not entry.get("disabled_by")]
     if len(active) != 1:
@@ -81,6 +81,32 @@ async def run():
         before_partner = manager.accesses[access_id]["partner_id"]
         current = snapshot(items)
         assert all(current.get(key) == value for key, value in baseline.items())
+        if disable_enable_authorized:
+            for action, expected_state in (("disable", "disabled"), ("enable", "loaded")):
+                await api.write(lock_id, {
+                    "partnerUserID": before_partner, "pin": before["pin"],
+                    "accessType": before["accessType"], "accessTimes": before["accessTimes"],
+                    "action": action, "retry": False,
+                })
+                await manager.wait(access_id, lambda pin: pin is not None and pin.get("state") == expected_state)
+                items = await manager.raw()
+                after = manager.owned(items, access_id)
+                if after is None or any(not isinstance(after.get(key), str) or not after[key] for key in identity_fields):
+                    raise RuntimeError("Activation result lacks an identity needed for comparison")
+                print(json.dumps({
+                    "stage": "candidate_" + action, "confirmed_state": after["state"],
+                    "yale_user_id_preserved": before_identity["userID"] == after["userID"],
+                    "pin_record_id_preserved": before_identity["_id"] == after["_id"],
+                    "cloud_partner_id_preserved": before_identity["partnerUserID"] == after["partnerUserID"],
+                    "managed_access_id_preserved": access_id in manager.accesses,
+                    "pin_preserved": before["pin"] == after["pin"],
+                    "schedule_preserved": before["accessTimes"] == after.get("accessTimes"),
+                }), flush=True)
+                current = snapshot(items)
+                assert all(current.get(key) == value for key, value in baseline.items())
+            await manager.delete(access_id)
+            print(json.dumps({"stage": "candidate_delete", "removed": True}), flush=True)
+            return
         await manager.update(access_id, {**data, "pin": codes[1],
                                         "starts_at": (start + timedelta(minutes=1)).isoformat(),
                                         "ends_at": (start + timedelta(minutes=13)).isoformat()})
@@ -127,4 +153,4 @@ if __name__ == "__main__":
     import sys
     if "--write-authorized" not in sys.argv:
         raise SystemExit("Explicit --write-authorized is required for this temporary test")
-    asyncio.run(run())
+    asyncio.run(run(disable_enable_authorized="--disable-enable-authorized" in sys.argv))

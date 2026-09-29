@@ -7,10 +7,15 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$IdentityFile,
 
-    [switch]$LiveTemporaryAuthorized
+    [switch]$LiveTemporaryAuthorized,
+
+    [switch]$LiveDisableEnableAuthorized
 )
 
 $ErrorActionPreference = 'Stop'
+if ($LiveDisableEnableAuthorized -and -not $LiveTemporaryAuthorized) {
+    throw 'Disable/enable requires authorization to create and clean up the temporary test access.'
+}
 $repository = Split-Path -Parent $PSScriptRoot
 $component = Join-Path $repository 'custom_components\yale_access_manager'
 $sources = @{}
@@ -31,6 +36,6 @@ $assets['hacs.json'] = Get-Content -LiteralPath (Join-Path $repository 'hacs.jso
 $runner = Get-Content -LiteralPath (Join-Path $repository 'tools\run_checks.py') -Raw -Encoding utf8
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runner))
 $remoteCommand = "sudo -n docker exec -e PYTHONDONTWRITEBYTECODE=1 -i homeassistant python3 -B -c `"import base64; exec(base64.b64decode('$encoded'))`""
-@{ sources = $sources; assets = $assets; authorized_live_temporary_test = [bool]$LiveTemporaryAuthorized } | ConvertTo-Json -Depth 100 -Compress |
+@{ sources = $sources; assets = $assets; authorized_live_temporary_test = [bool]$LiveTemporaryAuthorized; authorized_disable_enable_test = [bool]$LiveDisableEnableAuthorized } | ConvertTo-Json -Depth 100 -Compress |
     ssh -i $IdentityFile -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 $Target $remoteCommand
 if ($LASTEXITCODE -ne 0) { throw 'Yale native checks failed.' }

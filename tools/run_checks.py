@@ -31,7 +31,7 @@ if payload.get("authorized_live_temporary_test") is True:
     import asyncio
     import live_temporary_check
     try:
-        asyncio.run(live_temporary_check.run())
+        asyncio.run(live_temporary_check.run(disable_enable_authorized=payload.get("authorized_disable_enable_test") is True))
     except Exception as exc:
         print(json.dumps({"stage": "live_check_failed", "error_type": type(exc).__name__}))
         sys.exit(1)
