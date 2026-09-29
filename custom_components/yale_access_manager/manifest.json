@@ -1,7 +1,7 @@
 {
   "domain": "yale_access_manager",
   "name": "Yale Access Manager",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "documentation": "https://github.com/dbustosrc/yale-access-manager",
   "issue_tracker": "https://github.com/dbustosrc/yale-access-manager/issues",
   "codeowners": ["@dbustosrc"],

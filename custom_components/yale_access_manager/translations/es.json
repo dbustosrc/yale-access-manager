@@ -12,6 +12,7 @@
       }
     },
     "error": {
+      "yale_error": "{error}",
       "unknown_device": "La cerradura no pertenece a la cuenta seleccionada.",
       "source_unavailable": "Configura y activa la integración August primero.",
       "source_auth": "Vuelve a autenticar la integración August existente.",
@@ -117,6 +118,7 @@
       }
     },
     "error": {
+      "yale_error": "{error}",
       "invalid_pin": "El PIN debe tener de 4 a 8 dígitos ASCII.",
       "invalid_name": "Introduce un nombre de 1 a 80 caracteres.",
       "invalid_schedule": "Revisa fechas, días y horas. El fin debe ser posterior al inicio y el acceso temporal no puede estar vencido.",
@@ -140,6 +142,7 @@
     },
     "abort": {
       "not_ready": "La integración debe estar activa para administrar accesos.",
+      "yale_error": "{error}",
       "cannot_connect": "No se pudieron consultar los accesos en Yale.",
       "no_managed_accesses": "Primero crea un acceso con esta integración.",
       "no_mobile_app": "Configura un teléfono con Home Assistant Companion."

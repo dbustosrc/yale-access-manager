@@ -11,9 +11,10 @@ EVENT_TYPES = ("created", "updated", "disabled", "enabled", "keypad_unlock", "is
 
 
 class AccessError(Exception):
-    """An error code safe to display; never attach a server response or PIN."""
+    """Internal code plus an optional sanitized original Yale error."""
 
-    def __init__(self, code: str, *, uncertain: bool = False) -> None:
-        super().__init__(code)
+    def __init__(self, code: str, *, uncertain: bool = False, detail: str | None = None) -> None:
+        super().__init__(detail or code)
         self.code = code
         self.uncertain = uncertain
+        self.detail = detail

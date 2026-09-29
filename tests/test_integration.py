@@ -14,12 +14,12 @@ import yaml
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.exceptions import ServiceValidationError, Unauthorized
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, Unauthorized
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 
 from yale_access_manager import async_setup, async_setup_entry
-from yale_access_manager.api import YaleAPI
+from yale_access_manager.api import YaleAPI, redact_error
 from yale_access_manager.config_flow import AccessOptionsFlow, YaleAccessManagerConfigFlow
 from yale_access_manager.const import DOMAIN, AccessError
 from yale_access_manager.manager import AccessManager
@@ -406,6 +406,21 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flow._draft, {})
         self.assertNotIn(TEMP["pin"], json.dumps(self.store.data))
 
+    async def test_original_yale_error_reaches_action_and_form(self):
+        detail = 'Yale HTTP 409: {"errorName": "ValidationError", "message": "Invalid lastName"}'
+        await async_setup(self.hass, {})
+        self.api.next_failure = AccessError("write_rejected", detail=detail)
+        with self.assertRaises(HomeAssistantError) as result:
+            await self.hass.services.async_call(DOMAIN, "create_access", {"device_id": "device", **TEMP}, blocking=True)
+        self.assertEqual(str(result.exception), detail)
+        self.api.next_failure = AccessError("write_rejected", detail=detail)
+        flow = AccessOptionsFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "error-flow", "manager"
+        form = await flow.async_step_create_access({"name": "Guest", "pin": "234567", "access_type": "always"})
+        self.assertEqual(form["errors"], {"base": "yale_error"})
+        self.assertEqual(form["description_placeholders"], {"error": detail})
+        self.assertEqual(self.manager.accesses, {})
+
     async def test_config_flow_and_no_source(self):
         flow = YaleAccessManagerConfigFlow()
         flow.hass = self.hass
@@ -463,6 +478,49 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
 
 
 class TransportChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_http_error_details_and_logs_redact_secrets_without_retry(self):
+        class OAuth:
+            token = {"access_token": "synthetic-secret-token", "refresh_token": "synthetic-refresh"}
+
+            async def async_ensure_token_valid(self):
+                pass
+
+        class Response:
+            status = 409
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def text(self):
+                return json.dumps({"errorName": "ValidationError", "message": "Invalid lastName; PIN 234567; synthetic-secret-token",
+                                   "pin": "234567", "nested": {"refresh_token": "other-secret"}, "transactionID": "trace-id"})
+
+        response = Response()
+        session = SimpleNamespace(request=lambda *args, **kwargs: response)
+        source = SimpleNamespace(entry_id="source", state=ConfigEntryState.LOADED, async_start_reauth=lambda hass: None)
+        hass = SimpleNamespace(config_entries=SimpleNamespace(async_get_entry=lambda key: source))
+        api = YaleAPI(session, OAuth(), source, hass)
+        for status, code, uncertain in ((409, "write_rejected", False), (500, "write_rejected", True),
+                                        (401, "source_auth", False), (403, "access_denied", False), (429, "rate_limited", False)):
+            response.status = status
+            with self.assertLogs("yale_access_manager.api", level="ERROR") as logs:
+                with self.assertRaises(AccessError) as result:
+                    await api.write("private-lock", {"pin": "234567"})
+            error = result.exception
+            self.assertEqual((error.code, error.uncertain), (code, uncertain))
+            self.assertIn(f"Yale HTTP {status}", error.detail)
+            self.assertIn("Invalid lastName", error.detail)
+            self.assertIn("trace-id", error.detail)
+            exposed = error.detail + str(logs.output)
+            for secret in ("234567", "synthetic-secret-token", "other-secret", "private-lock"):
+                self.assertNotIn(secret, exposed)
+        plain = redact_error("Invalid PIN 234567; token=unknown-secret Bearer another-secret", [])
+        for secret in ("234567", "unknown-secret", "another-secret"):
+            self.assertNotIn(secret, plain)
+
     async def test_no_write_retry_or_credential_exception(self):
         class OAuth:
             token = {"access_token": "synthetic-secret-token"}

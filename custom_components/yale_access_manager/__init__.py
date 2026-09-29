@@ -65,6 +65,8 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
         elif action == "delete_access":
             await manager.delete(call.data["access_id"])
     except AccessError as exc:
+        if exc.detail:
+            raise HomeAssistantError(exc.detail) from None
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key=exc.code) from None
     finally:
         if action not in ("list_accesses", "begin_visit", "end_visit"):
@@ -110,6 +112,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except AccessError as exc:
         if api:
             await api.close()
+        if exc.detail:
+            raise ConfigEntryNotReady(exc.detail) from None
         raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key=exc.code) from None
     except Exception:
         if api:

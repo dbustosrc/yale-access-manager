@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Display Yale's original HTTP error response in management forms and action errors instead of replacing it with a generic rejection message.
+- Log the complete error response and HTTP status while redacting PINs and authentication material; successful access responses remain unlogged.
+- Preserve Yale error details through replacement rollback, activation and temporary issuance failures without retrying writes.
+
 ## 0.2.1
 
 - Add a reusable Home Assistant blueprint for on-demand guest access with explicit face, phone, lock and door checks.

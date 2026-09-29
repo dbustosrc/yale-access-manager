@@ -127,6 +127,13 @@ retired separately through Yale.
 
 ## Privacy and persistence
 
+Yale HTTP failures show the original response text and status in forms and
+action errors. The integration logs the complete sanitized error response at
+ERROR level, including server error names and transaction details when Yale
+returns them. PINs, tokens and other authentication material are redacted;
+successful PIN responses and request bodies are never logged. Non-HTTP errors
+retain the integration's local validation messages.
+
 - PIN values are not stored in entity state, attributes, options, responses,
   integration logs or the access journal. They are held temporarily in memory.
 - PINs necessarily pass through the Companion notification service and may be

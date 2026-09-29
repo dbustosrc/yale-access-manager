@@ -1,5 +1,8 @@
 """Direct PIN transport using yalexs branding and HA's existing OAuth session."""
 
+import json
+import logging
+import re
 from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -11,9 +14,34 @@ from yalexs.const import Brand
 
 from .const import AccessError
 
+_LOGGER = logging.getLogger(__name__)
+
+
+def redact_error(text: str, secrets: list[str]) -> str:
+    """Keep Yale's error wording and structure while removing credentials."""
+    def clean(value):
+        if isinstance(value, dict):
+            return {key: "[redacted]" if re.search(r"pin|token|password|secret|authorization|cookie|api.?key", key, re.I)
+                    else clean(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        return value
+
+    try:
+        text = json.dumps(clean(json.loads(text)), ensure_ascii=False)
+    except ValueError:
+        # Text/HTML errors can also echo fields outside a JSON object.
+        text = re.sub(r"(?i)((?:pin|token|password|secret|authorization|api.?key)\s*[:=]\s*)[^\s,<>]+",
+                      r"\1[redacted]", text)
+    text = re.sub(r"(?i)(bearer\s+)[^\s\"<>]+", r"\1[redacted]", text)
+    for secret in sorted(filter(None, secrets), key=len, reverse=True):
+        text = text.replace(secret, "[redacted]")
+    # Yale can embed an unrelated PIN inside an error message.
+    return re.sub(r"(?<![\w])\d{4,8}(?![\w])", "[redacted]", text)
+
 
 class YaleAPI:
-    """Never log raw headers, bodies, URLs or exceptions from the transport."""
+    """Log sanitized error responses; never log successful PIN responses."""
 
     def __init__(self, session: ClientSession, oauth, source, hass) -> None:
         self.session, self.oauth, self.source = session, oauth, source
@@ -37,21 +65,30 @@ class YaleAPI:
             raise AccessError("source_auth")
         headers = api_auth_headers(token, self.brand)
         headers.update({"Accept-Version": version, "Content-Type": "application/json"})
+        secrets = [value for key, value in headers.items() if isinstance(value, str)
+                   and re.search(r"authorization|token|api.?key", key, re.I)]
+        secrets.extend(value for key, value in self.oauth.token.items()
+                       if isinstance(value, str) and ("token" in key or "secret" in key))
+        secrets.extend(item.get("pin", "") for item in (payload or {}).get("commands", []) if isinstance(item, dict))
         # A write is sent once. An ambiguous response must be reconciled, not replayed.
         try:
             async with self.session.request(method, self.urls.get_brand_url(path), headers=headers,
                                             json=payload, timeout=ClientTimeout(total=25),
                                             allow_redirects=False) as response:
                 status = response.status
-                if status == 401:
-                    self.source.async_start_reauth(self.hass)
-                    raise AccessError("source_auth")
-                if status == 403:
-                    raise AccessError("access_denied")
-                if status == 429:
-                    raise AccessError("rate_limited")
                 if status not in (200, 201, 202, 204):
-                    raise AccessError("write_rejected" if method == "POST" else "cannot_connect",
+                    try:
+                        body = redact_error(await response.text(), secrets)
+                    except (ClientError, TimeoutError, UnicodeError):
+                        body = "[response body unavailable]"
+                    detail = f"Yale HTTP {status}: {body}" if body else f"Yale HTTP {status} (empty response)"
+                    endpoint = re.sub(r"/(locks|houses)/[^/?]+", r"/\1/{id}", path)
+                    _LOGGER.error("Yale %s %s: %s", method, endpoint, detail)
+                    if status == 401:
+                        self.source.async_start_reauth(self.hass)
+                    code = {401: "source_auth", 403: "access_denied", 429: "rate_limited"}.get(
+                        status, "write_rejected" if method == "POST" else "cannot_connect")
+                    raise AccessError(code, detail=detail,
                                       uncertain=method == "POST" and (status >= 500 or status == 408 or status < 400))
                 if status == 204:
                     return {}
@@ -62,11 +99,14 @@ class YaleAPI:
                 if not isinstance(result, dict):
                     raise AccessError("invalid_response", uncertain=method == "POST")
                 return result
-        except (ClientError, TimeoutError, RuntimeError, ValueError, TypeError):
+        except (ClientError, TimeoutError, RuntimeError, ValueError, TypeError) as exc:
+            detail = f"Yale transport {type(exc).__name__}: {redact_error(str(exc), secrets)}"
+            _LOGGER.error("Yale %s request failed: %s", method, detail)
             raise AccessError("outcome_unknown" if method == "POST" else "cannot_connect",
-                              uncertain=method == "POST") from None
+                              uncertain=method == "POST", detail=detail) from None
         finally:
             headers.clear()
+            secrets.clear()
 
     async def locks(self) -> dict:
         return await self.request("GET", "/users/locks/mine")

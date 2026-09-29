@@ -152,7 +152,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
                 await self.maintain()
             listing = await self.list_accesses()
         except AccessError as exc:
-            raise UpdateFailed(exc.code) from None
+            raise UpdateFailed(str(exc)) from None
         items = listing["accesses"]
         self.update_interval = timedelta(seconds=15 if any(record.get("lease") for record in self.accesses.values()) else 60)
         return {"total": sum(item["state"] != "not_found" for item in items),
@@ -182,7 +182,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
         try:
             await self.wait(access_id, lambda pin: pin is not None and matches(pin, desired))
         except AccessError as exc:
-            raise AccessError(exc.code, uncertain=True) from None
+            raise AccessError(exc.code, uncertain=True, detail=exc.detail) from None
         pin = self.owned(await self.raw(), access_id)
         user_id = pin.get("userID") if pin else None
         if not isinstance(user_id, str) or not user_id:
@@ -200,7 +200,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
         try:
             await self.wait(access_id, lambda value: value is None)
         except AccessError as exc:
-            raise AccessError(exc.code, uncertain=True) from None
+            raise AccessError(exc.code, uncertain=True, detail=exc.detail) from None
 
     async def failed(self, access_id: str) -> None:
         self.accesses[access_id]["operation"] = "unknown"
@@ -267,7 +267,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
                     if pin.get("state") == "disabled":
                         await self._activation(access_id, False)
                     await self.save()
-                    raise AccessError("update_rolled_back") from None
+                    raise AccessError("update_rolled_back", detail=(f"{exc.detail}\nPrevious access restored." if exc.detail else None)) from None
                 raise
         except AccessError as exc:
             if exc.code != "update_rolled_back":
@@ -392,7 +392,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
                 await self.wait(access_id, lambda current: current is not None and current.get("state") == target)
             except AccessError as exc:
                 await self.failed(access_id)
-                raise AccessError(exc.code, uncertain=True) from None
+                raise AccessError(exc.code, uncertain=True, detail=exc.detail) from None
         record["operation"] = "ready"
         if not enabled:
             record.pop("lease", None)
@@ -444,7 +444,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
                     await self.failed(key)
                 if isinstance(exc, asyncio.CancelledError):
                     raise
-                raise AccessError("issue_failed") from None
+                raise AccessError("issue_failed", detail=exc.detail if isinstance(exc, AccessError) else None) from None
             self.emit(key, "issued", expires_at=end.isoformat())
         await self.async_request_refresh()
         return {"access_id": key, "expires_at": end.isoformat()}

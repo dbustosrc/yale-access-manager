@@ -12,6 +12,7 @@
       }
     },
     "error": {
+      "yale_error": "{error}",
       "unknown_device": "The lock does not belong to the selected August account.",
       "source_unavailable": "Configure and load the August integration first.",
       "source_auth": "Reauthenticate the existing August integration.",
@@ -117,6 +118,7 @@
       }
     },
     "error": {
+      "yale_error": "{error}",
       "invalid_pin": "The PIN must contain 4 to 8 ASCII digits.",
       "invalid_name": "Enter a guest name of 1 to 80 characters.",
       "invalid_schedule": "Check the access dates, weekdays and times. The end must be later than the start; temporary access must not already be expired.",
@@ -140,6 +142,7 @@
     },
     "abort": {
       "not_ready": "The integration must be loaded before managing access.",
+      "yale_error": "{error}",
       "cannot_connect": "Unable to read accesses from Yale.",
       "no_managed_accesses": "Create an access with this integration first.",
       "no_mobile_app": "Configure a Home Assistant Companion phone."
