@@ -72,13 +72,34 @@ async def run():
                 "starts_at": start.isoformat(), "ends_at": (start + timedelta(minutes=15)).isoformat()}
         access_id = await manager.create(data)
         print(json.dumps({"stage": "candidate_create", "loaded": True}), flush=True)
-        current = snapshot(await manager.raw())
+        items = await manager.raw()
+        before = manager.owned(items, access_id)
+        identity_fields = ("_id", "userID", "partnerUserID")
+        if before is None or any(not isinstance(before.get(key), str) or not before[key] for key in identity_fields):
+            raise RuntimeError("Created access lacks an identity needed for comparison")
+        before_identity = {key: before[key] for key in identity_fields}
+        before_partner = manager.accesses[access_id]["partner_id"]
+        current = snapshot(items)
         assert all(current.get(key) == value for key, value in baseline.items())
         await manager.update(access_id, {**data, "pin": codes[1],
                                         "starts_at": (start + timedelta(minutes=1)).isoformat(),
                                         "ends_at": (start + timedelta(minutes=13)).isoformat()})
         print(json.dumps({"stage": "candidate_replace", "loaded": True}), flush=True)
-        current = snapshot(await manager.raw())
+        items = await manager.raw()
+        after = manager.owned(items, access_id)
+        if after is None or any(not isinstance(after.get(key), str) or not after[key] for key in identity_fields):
+            raise RuntimeError("Replaced access lacks an identity needed for comparison")
+        print(json.dumps({
+            "stage": "identity_comparison",
+            "yale_user_id_preserved": before_identity["userID"] == after["userID"],
+            "pin_record_id_preserved": before_identity["_id"] == after["_id"],
+            "cloud_partner_id_preserved": before_identity["partnerUserID"] == after["partnerUserID"],
+            "managed_partner_id_preserved": before_partner == manager.accesses[access_id]["partner_id"],
+            "managed_access_id_preserved": access_id in manager.accesses,
+            "pin_changed": before["pin"] != after["pin"],
+            "schedule_changed": before.get("accessTimes") != after.get("accessTimes"),
+        }), flush=True)
+        current = snapshot(items)
         assert all(current.get(key) == value for key, value in baseline.items())
         await manager.delete(access_id)
         print(json.dumps({"stage": "candidate_delete", "removed": True}), flush=True)
