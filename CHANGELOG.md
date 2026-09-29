@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+- Add an explicit pending-access cancellation action and native form that use the original PIN and managed partner ID, including when Yale no longer lists the attempted load.
+- Remove a pending journal entry only after Yale accepts its deletion request and a fresh read confirms absence; preserve it on rejection or uncertainty.
+- Show the pending access ID in blocked-operation errors and log confirmation timeouts with the last observed Yale state.
+- Log accepted write transaction IDs without logging PINs or request bodies.
+
 ## 0.2.3
 
 - Fix Yale rejecting guests with a single-word name: omit the optional surname instead of sending an empty field.

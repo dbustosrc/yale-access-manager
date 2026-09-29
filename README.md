@@ -36,6 +36,9 @@ Open the integration's **Configure/options** button in Devices & services:
 - **Resolve pending operation** verifies the expected PIN and metadata by reading
   Yale, without repeating a write.
 - **Delete access** removes the selected managed entry and waits for confirmation.
+- **Cancel pending access** sends an explicit deletion for the unresolved managed
+  ID using its original PIN, even if the attempted load is absent in Yale.
+  A rejection keeps the journal pending; it never just erases the record.
 - **Disable/enable access** changes keypad availability while retaining the guest
   and its Yale user ID. Do not enable an expired temporary schedule.
 - **Link person** connects one managed guest to a Home Assistant person and a
@@ -67,6 +70,7 @@ automation, and an explicit configured lock `device_id`.
 | `yale_access_manager.update_access` | Same fields plus a managed `access_id` | Confirms replacement or raises a clear error |
 | `yale_access_manager.reconcile_access` | Same fields plus a managed `access_id` | Confirms an existing loaded entry by reading only |
 | `yale_access_manager.delete_access` | `device_id`, managed `access_id` | Confirms removal |
+| `yale_access_manager.cancel_pending_access` | `device_id`, pending `access_id`, original `pin` | Requests deletion for the original partner and clears the journal only after Yale accepts it and a fresh read confirms absence |
 | `yale_access_manager.disable_access` | `device_id`, managed `access_id` | Confirms the PIN is disabled in Yale's API |
 | `yale_access_manager.enable_access` | `device_id`, managed `access_id` | Confirms an unexpired PIN is loaded |
 | `yale_access_manager.bind_person` | `device_id`, managed `access_id`, `person_entity_id`, `notification_entry_id` | Links stable identifiers |

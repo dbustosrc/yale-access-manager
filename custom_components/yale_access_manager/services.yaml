@@ -152,6 +152,23 @@ delete_access:
       selector:
         text:
 
+cancel_pending_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+    pin:
+      required: true
+      selector:
+        text:
+          type: password
+
 disable_access:
   fields:
     device_id:

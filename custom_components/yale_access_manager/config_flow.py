@@ -74,7 +74,8 @@ class AccessOptionsFlow(OptionsFlow):
         if self.config_entry.state is not ConfigEntryState.LOADED:
             return self.async_abort(reason="not_ready")
         return self.async_show_menu(step_id="init", menu_options=["list_accesses", "create_access", "update_access", "bind_person",
-                                                                 "disable_access", "enable_access", "reconcile_access", "delete_access"])
+                                                                 "disable_access", "enable_access", "reconcile_access", "delete_access",
+                                                                 "cancel_pending_access"])
 
     async def async_step_list_accesses(self, user_input=None):
         if user_input is not None:
@@ -106,6 +107,8 @@ class AccessOptionsFlow(OptionsFlow):
                 return await self._details()
             if step_id == "bind_person":
                 return await self.async_step_person()
+            if step_id == "cancel_pending_access":
+                return await self.async_step_cancel_pending_pin()
             try:
                 if step_id == "delete_access":
                     await self.manager.delete(self._access_id)
@@ -122,7 +125,8 @@ class AccessOptionsFlow(OptionsFlow):
                 return self.async_abort(reason="yale_error", description_placeholders={"error": exc.detail})
             return self.async_abort(reason="cannot_connect")
         choices = [{"value": item["access_id"], "label": f"{item['name']} · {item['state']} · {item['operation']}"}
-                   for item in listing["accesses"] if item["managed"]]
+                   for item in listing["accesses"] if item["managed"]
+                   and (step_id != "cancel_pending_access" or item["operation"] != "ready")]
         if not choices:
             return self.async_abort(reason="no_managed_accesses")
         return self.async_show_form(step_id=step_id, errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
@@ -136,6 +140,22 @@ class AccessOptionsFlow(OptionsFlow):
 
     async def async_step_reconcile_access(self, user_input=None):
         return await self._select("reconcile_access", user_input)
+
+    async def async_step_cancel_pending_access(self, user_input=None):
+        return await self._select("cancel_pending_access", user_input)
+
+    async def async_step_cancel_pending_pin(self, user_input=None):
+        errors, placeholders = {}, {}
+        if user_input is not None:
+            try:
+                await self.manager.delete(self._access_id, cancellation_pin=user_input["pin"])
+                return self.async_create_entry(title="", data={})
+            except AccessError as exc:
+                errors["base"] = "yale_error" if exc.detail else exc.code
+                placeholders = {"error": exc.detail} if exc.detail else {}
+        return self.async_show_form(step_id="cancel_pending_pin", errors=errors, description_placeholders=placeholders,
+                                    data_schema=vol.Schema({vol.Required("pin"): selector.TextSelector(
+                                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD))}))
 
     async def async_step_disable_access(self, user_input=None):
         return await self._select("disable_access", user_input)

@@ -39,7 +39,8 @@
           "reconcile_access": "Resolve pending operation",
           "disable_access": "Disable access",
           "enable_access": "Enable access",
-          "bind_person": "Link person"
+          "bind_person": "Link person",
+          "cancel_pending_access": "Cancel pending access"
         }
       },
       "list_accesses": {
@@ -106,6 +107,20 @@
         "description": "Select a managed access. Disabling retains its identity and association.",
         "data": {
           "access_id": "Managed guest"
+        }
+      },
+      "cancel_pending_access": {
+        "title": "Cancel pending access",
+        "description": "Select only the unresolved managed attempt to cancel.",
+        "data": {
+          "access_id": "Pending access"
+        }
+      },
+      "cancel_pending_pin": {
+        "title": "Confirm cancellation",
+        "description": "Enter the original attempt's PIN. This sends a deletion to Yale even if the access is absent. The journal is retained if Yale rejects the request or absence is unconfirmed.",
+        "data": {
+          "pin": "Original PIN"
         }
       },
       "person": {
@@ -421,6 +436,24 @@
         "person_entity_id": {
           "name": "Person",
           "description": "Person linked by its stable identifier."
+        }
+      }
+    },
+    "cancel_pending_access": {
+      "name": "Cancel pending access",
+      "description": "Send deletion for the original partner using its PIN. Pending attempts only; retain the journal on uncertainty. PIN inputs can appear in automation traces.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Pending access ID",
+          "description": "The managed pending ID returned by List accesses."
+        },
+        "pin": {
+          "name": "Original PIN",
+          "description": "The PIN used by the unresolved attempt."
         }
       }
     },

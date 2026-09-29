@@ -1,6 +1,7 @@
 """Per-lock operations, metadata polling and a durable non-secret journal."""
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import re
@@ -17,6 +18,8 @@ from homeassistant.util import slugify
 
 from .const import DOMAIN, NAME, AccessError
 from .models import command, matches, metadata, records, saved
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class AccessManager(DataUpdateCoordinator[dict]):
@@ -166,7 +169,11 @@ class AccessManager(DataUpdateCoordinator[dict]):
             if predicate(pin):
                 return
             if asyncio.get_running_loop().time() >= deadline:
-                raise AccessError("outcome_unknown", uncertain=True)
+                detail = (f"Yale completion unconfirmed after {self.poll_timeout} seconds. "
+                          f"Access ID: {access_id}; last Yale state: {pin.get('state') if pin else 'not_found'}. "
+                          "Inspect this access before another write; do not repeat creation.")
+                _LOGGER.error("%s", detail)
+                raise AccessError("outcome_unknown", uncertain=True, detail=detail)
             await asyncio.sleep(self.poll_interval)
 
     def validate(self, data: dict, items: list[dict], existing: dict | None = None) -> dict:
@@ -207,8 +214,10 @@ class AccessManager(DataUpdateCoordinator[dict]):
         await self.save()
 
     def ensure_idle(self) -> None:
-        if any(record["operation"] != "ready" for record in self.accesses.values()):
-            raise AccessError("operation_pending")
+        pending = [f"{key} ({record['operation']})" for key, record in self.accesses.items() if record["operation"] != "ready"]
+        if pending:
+            raise AccessError("operation_pending", detail="Unresolved Yale operation: " + ", ".join(pending)
+                              + ". Reconcile a loaded access or explicitly cancel the pending access before creating another.")
 
     async def create(self, data: dict) -> str:
         async with self.operation_lock:
@@ -526,16 +535,34 @@ class AccessManager(DataUpdateCoordinator[dict]):
             await self.save()
         await self.async_request_refresh()
 
-    async def delete(self, access_id: str) -> None:
+    async def delete(self, access_id: str, *, cancellation_pin: str | None = None) -> None:
         async with self.operation_lock:
+            record = self.accesses.get(access_id)
+            if record is None:
+                raise AccessError("not_managed")
             pin = self.owned(await self.raw(), access_id)
-            if pin is None and self.accesses[access_id]["operation"] != "ready":
+            if cancellation_pin is not None:
+                if not isinstance(cancellation_pin, str) or not re.fullmatch(r"[0-9]{4,8}", cancellation_pin):
+                    raise AccessError("invalid_pin")
+                if record["operation"] == "ready" or record.get("lease"):
+                    raise AccessError("operation_pending")
+                if pin is not None and pin.get("pin") != cancellation_pin:
+                    raise AccessError("identity_changed")
+            if pin is None and record["operation"] != "ready" and cancellation_pin is None:
                 raise AccessError("operation_pending")
-            self.accesses[access_id]["operation"] = "deleting"
+            if pin and record.get("user_id", pin.get("userID")) != pin.get("userID"):
+                raise AccessError("identity_changed")
+            record["operation"] = "deleting"
             await self.save()
             try:
                 if pin is not None:
                     await self.remove_pin(access_id, pin)
+                elif cancellation_pin is not None:
+                    # Explicit cancellation targets the original partner, even if its load is absent.
+                    await self.api.write(self.lock_id, {
+                        "partnerUserID": record["partner_id"], "pin": cancellation_pin,
+                        "accessType": record["metadata"]["accessType"], "action": "delete", "retry": False})
+                    await self.wait(access_id, lambda current: current is None)
             except AccessError:
                 await self.failed(access_id)
                 raise

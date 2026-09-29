@@ -238,6 +238,45 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.api.entries[-1]["pin"], TEMP["pin"])
         self.assertEqual(self.manager.accesses[access_id]["operation"], "ready")
 
+    async def test_missing_pending_access_requires_explicit_cancellation(self):
+        self.api.pending = True
+        with self.assertRaises(AccessError):
+            await self.manager.create(TEMP)
+        access_id = next(iter(self.manager.accesses))
+        self.api.entries = [self.api.entries[0]]  # Yale stopped listing the attempted load.
+        writes = len(self.api.writes)
+        with self.assertRaises(AccessError):
+            await self.manager.delete(access_id)
+        with self.assertRaises(AccessError):
+            await self.manager.delete(access_id, cancellation_pin="invalid")
+        self.assertEqual(len(self.api.writes), writes)
+        self.api.next_failure = AccessError("write_rejected", detail="Yale rejected cancellation")
+        with self.assertRaises(AccessError):
+            await self.manager.delete(access_id, cancellation_pin=TEMP["pin"])
+        self.assertEqual(self.manager.accesses[access_id]["operation"], "unknown")
+        flow = AccessOptionsFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "cancel-flow", "manager"
+        form = await flow.async_step_cancel_pending_access({"access_id": access_id})
+        self.assertEqual(form["step_id"], "cancel_pending_pin")
+        result = await flow.async_step_cancel_pending_pin({"pin": TEMP["pin"]})
+        self.assertEqual(result["data"], {})
+        self.assertEqual(self.api.writes[-1]["partnerUserID"], "yam-" + access_id)
+        self.assertEqual(self.api.writes[-1]["action"], "delete")
+        self.assertEqual(len(self.api.entries), 1)
+        self.assertEqual(self.manager.accesses, {})
+
+    async def test_cancellation_cannot_target_ready_guest_or_different_pin(self):
+        access_id = await self.manager.create(TEMP)
+        writes = len(self.api.writes)
+        with self.assertRaises(AccessError):
+            await self.manager.delete(access_id, cancellation_pin=TEMP["pin"])
+        self.manager.accesses[access_id]["operation"] = "unknown"
+        with self.assertRaises(AccessError):
+            await self.manager.delete(access_id, cancellation_pin="234567")
+        with self.assertRaises(AccessError):
+            await self.manager.delete("external:external", cancellation_pin=TEMP["pin"])
+        self.assertEqual(len(self.api.writes), writes)
+
     async def test_persistent_guest_issue_use_and_revocation(self):
         access_id = await self.manager.create(TEMP)
         yale_id = self.manager.accesses[access_id]["user_id"]

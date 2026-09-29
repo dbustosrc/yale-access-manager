@@ -39,7 +39,8 @@
           "reconcile_access": "Resolver operación pendiente",
           "disable_access": "Desactivar acceso",
           "enable_access": "Reactivar acceso",
-          "bind_person": "Vincular persona"
+          "bind_person": "Vincular persona",
+          "cancel_pending_access": "Cancelar acceso pendiente"
         }
       },
       "list_accesses": {
@@ -106,6 +107,20 @@
         "description": "Selecciona un acceso gestionado. La identidad y su vinculación se conservan al desactivar.",
         "data": {
           "access_id": "Invitado gestionado"
+        }
+      },
+      "cancel_pending_access": {
+        "title": "Cancelar acceso pendiente",
+        "description": "Selecciona únicamente el intento gestionado pendiente que deseas cancelar.",
+        "data": {
+          "access_id": "Acceso pendiente"
+        }
+      },
+      "cancel_pending_pin": {
+        "title": "Confirmar cancelación",
+        "description": "Introduce el PIN original del intento. Esto envía una eliminación a Yale aunque el acceso no aparezca. El diario se conserva si Yale rechaza la solicitud o no confirma su ausencia.",
+        "data": {
+          "pin": "PIN original"
         }
       },
       "person": {
@@ -421,6 +436,24 @@
         "person_entity_id": {
           "name": "Persona",
           "description": "Persona vinculada mediante su identificador estable."
+        }
+      }
+    },
+    "cancel_pending_access": {
+      "name": "Cancelar acceso pendiente",
+      "description": "Envía una eliminación para el partner original usando su PIN. Solo para intentos pendientes; el diario se conserva si el resultado es incierto. El PIN puede aparecer en trazas de automatización.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "Cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID del intento",
+          "description": "ID gestionado devuelto por Listar accesos."
+        },
+        "pin": {
+          "name": "PIN original",
+          "description": "El PIN usado en el intento pendiente."
         }
       }
     },

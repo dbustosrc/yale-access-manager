@@ -64,6 +64,8 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
             await manager.end_visit(call.data["person_entity_id"])
         elif action == "delete_access":
             await manager.delete(call.data["access_id"])
+        elif action == "cancel_pending_access":
+            await manager.delete(call.data["access_id"], cancellation_pin=call.data["pin"])
     except AccessError as exc:
         if exc.detail:
             raise HomeAssistantError(exc.detail) from None
@@ -80,6 +82,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         "update_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string, **ACCESS_FIELDS},
         "reconcile_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string, **ACCESS_FIELDS},
         "delete_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
+        "cancel_pending_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,
+                                  vol.Required("pin"): cv.string},
         "disable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "enable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "bind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,

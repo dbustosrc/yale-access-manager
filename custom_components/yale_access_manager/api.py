@@ -125,7 +125,11 @@ class YaleAPI:
         return events
 
     async def write(self, lock_id: str, command: dict) -> dict:
-        return await self.request("POST", f"/locks/{quote(lock_id, safe='')}/pins", {"commands": [command]})
+        result = await self.request("POST", f"/locks/{quote(lock_id, safe='')}/pins", {"commands": [command]})
+        transaction = result.get("transactionID")
+        if isinstance(transaction, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", transaction):
+            _LOGGER.info("Yale %s request accepted; transactionID=%s", command.get("action"), transaction)
+        return result
 
     async def close(self) -> None:
         await self.session.close()
