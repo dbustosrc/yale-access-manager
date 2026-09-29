@@ -71,7 +71,8 @@ class AccessOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input=None):
         if self.config_entry.state is not ConfigEntryState.LOADED:
             return self.async_abort(reason="not_ready")
-        return self.async_show_menu(step_id="init", menu_options=["list_accesses", "create_access", "update_access", "reconcile_access", "delete_access"])
+        return self.async_show_menu(step_id="init", menu_options=["list_accesses", "create_access", "update_access", "bind_person",
+                                                                 "disable_access", "enable_access", "reconcile_access", "delete_access"])
 
     async def async_step_list_accesses(self, user_input=None):
         if user_input is not None:
@@ -81,7 +82,7 @@ class AccessOptionsFlow(OptionsFlow):
         except AccessError:
             return self.async_abort(reason="cannot_connect")
         lines = [f"{item['name']} | {item['access_type']} | {item['state']} | "
-                 f"{item['operation']} | {item['access_id']}" for item in listing["accesses"]]
+                 f"{item['operation']} | {item['access_id']} | {item.get('person_entity_id') or '—'}" for item in listing["accesses"]]
         # Fenced plain text keeps guest names from becoming Markdown links.
         content = "```text\n" + "\n".join(lines).replace("`", "") + "\n```" if lines else "—"
         return self.async_show_form(step_id="list_accesses", data_schema=vol.Schema({}),
@@ -98,8 +99,13 @@ class AccessOptionsFlow(OptionsFlow):
             if step_id in ("update_access", "reconcile_access"):
                 self._mode = step_id
                 return await self._details()
+            if step_id == "bind_person":
+                return await self.async_step_person()
             try:
-                await self.manager.delete(self._access_id)
+                if step_id == "delete_access":
+                    await self.manager.delete(self._access_id)
+                else:
+                    await self.manager.set_enabled(self._access_id, step_id == "enable_access")
                 return self.async_create_entry(title="", data={})
             except AccessError as exc:
                 errors["base"] = exc.code
@@ -122,6 +128,32 @@ class AccessOptionsFlow(OptionsFlow):
 
     async def async_step_reconcile_access(self, user_input=None):
         return await self._select("reconcile_access", user_input)
+
+    async def async_step_disable_access(self, user_input=None):
+        return await self._select("disable_access", user_input)
+
+    async def async_step_enable_access(self, user_input=None):
+        return await self._select("enable_access", user_input)
+
+    async def async_step_bind_person(self, user_input=None):
+        return await self._select("bind_person", user_input)
+
+    async def async_step_person(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            try:
+                await self.manager.bind_person(self._access_id, user_input["person_entity_id"], user_input["notification_entry_id"])
+                return self.async_create_entry(title="", data={})
+            except AccessError as exc:
+                errors["base"] = exc.code
+        phones = [{"value": entry.entry_id, "label": entry.title} for entry in self.hass.config_entries.async_entries("mobile_app")
+                  if entry.state is ConfigEntryState.LOADED]
+        if not phones:
+            return self.async_abort(reason="no_mobile_app")
+        return self.async_show_form(step_id="person", errors=errors, data_schema=vol.Schema({
+            vol.Required("person_entity_id"): selector.EntitySelector(selector.EntitySelectorConfig(filter={"domain": "person"})),
+            vol.Required("notification_entry_id"): selector.SelectSelector(selector.SelectSelectorConfig(options=phones)),
+        }))
 
     async def _details(self, user_input=None, errors=None):
         if user_input is not None:

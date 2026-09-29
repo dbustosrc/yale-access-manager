@@ -21,7 +21,7 @@ class YaleAPI:
         self.brand = Brand.YALE_AUGUST
         self.urls = ApiCommon(self.brand)
 
-    async def request(self, method: str, path: str, payload: dict | None = None):
+    async def request(self, method: str, path: str, payload: dict | None = None, *, version="0.0.1"):
         if (self.hass.config_entries.async_get_entry(self.source.entry_id) is not self.source
                 or self.source.state is not ConfigEntryState.LOADED):
             raise AccessError("source_unavailable")
@@ -36,7 +36,7 @@ class YaleAPI:
         if not isinstance(token, str) or not token or "\r" in token or "\n" in token:
             raise AccessError("source_auth")
         headers = api_auth_headers(token, self.brand)
-        headers.update({"Accept-Version": "0.0.1", "Content-Type": "application/json"})
+        headers.update({"Accept-Version": version, "Content-Type": "application/json"})
         # A write is sent once. An ambiguous response must be reconciled, not replayed.
         try:
             async with self.session.request(method, self.urls.get_brand_url(path), headers=headers,
@@ -76,6 +76,13 @@ class YaleAPI:
 
     async def pins(self, lock_id: str) -> dict:
         return await self.request("GET", f"/locks/{quote(lock_id, safe='')}/pins")
+
+    async def activities(self, house_id: str) -> list[dict]:
+        result = await self.request("GET", f"/houses/{quote(house_id, safe='')}/activities?limit=50", version="4.0.0")
+        events = result.get("events")
+        if not isinstance(events, list) or any(not isinstance(item, dict) for item in events):
+            raise AccessError("invalid_response")
+        return events
 
     async def write(self, lock_id: str, command: dict) -> dict:
         return await self.request("POST", f"/locks/{quote(lock_id, safe='')}/pins", {"commands": [command]})

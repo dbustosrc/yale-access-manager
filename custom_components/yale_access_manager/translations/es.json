@@ -35,7 +35,10 @@
           "create_access": "Crear acceso",
           "update_access": "Reemplazar acceso",
           "delete_access": "Eliminar acceso",
-          "reconcile_access": "Resolver operación pendiente"
+          "reconcile_access": "Resolver operación pendiente",
+          "disable_access": "Desactivar acceso",
+          "enable_access": "Reactivar acceso",
+          "bind_person": "Vincular persona"
         }
       },
       "list_accesses": {
@@ -82,6 +85,35 @@
         "data": {
           "access_id": "Acceso"
         }
+      },
+      "disable_access": {
+        "title": "Desactivar acceso",
+        "description": "Selecciona un acceso gestionado. La identidad y su vinculación se conservan al desactivar.",
+        "data": {
+          "access_id": "Invitado gestionado"
+        }
+      },
+      "enable_access": {
+        "title": "Reactivar acceso",
+        "description": "Selecciona un acceso gestionado. La identidad y su vinculación se conservan al desactivar.",
+        "data": {
+          "access_id": "Invitado gestionado"
+        }
+      },
+      "bind_person": {
+        "title": "Vincular persona",
+        "description": "Selecciona un acceso gestionado. La identidad y su vinculación se conservan al desactivar.",
+        "data": {
+          "access_id": "Invitado gestionado"
+        }
+      },
+      "person": {
+        "title": "Vincular persona",
+        "description": "Vinculación por identificadores, sin cambiar presencia. El teléfono debe pertenecer a la cuenta asociada a la persona.",
+        "data": {
+          "person_entity_id": "Persona",
+          "notification_entry_id": "Teléfono Companion"
+        }
       }
     },
     "error": {
@@ -100,12 +132,17 @@
       "access_denied": "Se requiere acceso de propietario.",
       "rate_limited": "Yale está limitando las solicitudes.",
       "not_managed": "La integración no administra ese acceso.",
-      "invalid_response": "Yale devolvió una respuesta inesperada; no se asume que la operación terminó."
+      "invalid_response": "Yale devolvió una respuesta inesperada; no se asume que la operación terminó.",
+      "invalid_person": "Selecciona una persona y un teléfono Companion registrado en su misma cuenta.",
+      "ambiguous_person": "Vincula exactamente un invitado gestionado a esta persona para esta cerradura.",
+      "identity_changed": "La identidad Yale cambió. Revisa el invitado antes de autorizar otro acceso.",
+      "issue_failed": "No se confirmó el envío del código. Se solicitó revocar el acceso; revisa su estado."
     },
     "abort": {
       "not_ready": "La integración debe estar activa para administrar accesos.",
       "cannot_connect": "No se pudieron consultar los accesos en Yale.",
-      "no_managed_accesses": "Primero crea un acceso con esta integración."
+      "no_managed_accesses": "Primero crea un acceso con esta integración.",
+      "no_mobile_app": "Configura un teléfono con Home Assistant Companion."
     }
   },
   "selector": {
@@ -138,6 +175,26 @@
       },
       "pending": {
         "name": "Operaciones de acceso pendientes"
+      }
+    },
+    "event": {
+      "access_activity": {
+        "name": "Actividad de acceso",
+        "state_attributes": {
+          "event_type": {
+            "name": "Operación",
+            "state": {
+              "created": "Creado",
+              "updated": "Actualizado",
+              "disabled": "Desactivado",
+              "enabled": "Reactivado",
+              "keypad_unlock": "Desbloqueo por PIN",
+              "issued": "Código emitido",
+              "expired": "Vigencia terminada",
+              "deleted": "Eliminado"
+            }
+          }
+        }
       }
     }
   },
@@ -299,6 +356,70 @@
           "description": "La franja no puede cruzar medianoche."
         }
       }
+    },
+    "disable_access": {
+      "name": "Desactivar acceso",
+      "description": "Solo administradores; conserva la identidad gestionada.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "Cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID del acceso",
+          "description": "Identificador del invitado gestionado."
+        }
+      }
+    },
+    "enable_access": {
+      "name": "Reactivar acceso",
+      "description": "Solo administradores; conserva la identidad gestionada.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "Cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID del acceso",
+          "description": "Identificador del invitado gestionado."
+        }
+      }
+    },
+    "bind_person": {
+      "name": "Vincular persona",
+      "description": "Solo administradores; conserva la identidad gestionada.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "Cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID del acceso",
+          "description": "Identificador del invitado gestionado."
+        },
+        "person_entity_id": {
+          "name": "Persona",
+          "description": "Persona vinculada mediante su identificador estable."
+        },
+        "notification_entry_id": {
+          "name": "Teléfono Companion",
+          "description": "Registro mobile_app perteneciente a la cuenta de la persona."
+        }
+      }
+    },
+    "issue_access": {
+      "name": "Emitir código temporal",
+      "description": "Renueva el PIN por diez minutos y lo envía al teléfono vinculado. Revoca al detectar uso o vencimiento. No devuelve el PIN.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "Cerradura Yale configurada."
+        },
+        "person_entity_id": {
+          "name": "Persona",
+          "description": "Persona vinculada mediante su identificador estable."
+        }
+      }
     }
   },
   "exceptions": {
@@ -358,6 +479,18 @@
     },
     "update_rolled_back": {
       "message": "El reemplazo fue rechazado; se restauró el PIN anterior."
+    },
+    "invalid_person": {
+      "message": "Selecciona una persona y un teléfono Companion registrado en su misma cuenta."
+    },
+    "ambiguous_person": {
+      "message": "Vincula exactamente un invitado gestionado a esta persona para esta cerradura."
+    },
+    "identity_changed": {
+      "message": "La identidad Yale cambió. Revisa el invitado antes de autorizar otro acceso."
+    },
+    "issue_failed": {
+      "message": "No se confirmó el envío del código. Se solicitó revocar el acceso; revisa su estado."
     }
   }
 }

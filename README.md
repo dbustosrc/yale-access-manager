@@ -36,6 +36,11 @@ Open the integration's **Configure/options** button in Devices & services:
 - **Resolve pending operation** verifies the expected PIN and metadata by reading
   Yale, without repeating a write.
 - **Delete access** removes the selected managed entry and waits for confirmation.
+- **Disable/enable access** changes keypad availability while retaining the guest
+  and its Yale user ID. Do not enable an expired temporary schedule.
+- **Link person** connects one managed guest to a Home Assistant person and a
+  Companion phone registered to that person's HA account. Names are not used
+  as identity keys.
 
 Permanent, temporary and weekly recurring access are supported. Temporary dates
 use Home Assistant's timezone. Recurring times use the lock's timezone in the
@@ -62,6 +67,10 @@ automation, and an explicit configured lock `device_id`.
 | `yale_access_manager.update_access` | Same fields plus a managed `access_id` | Confirms replacement or raises a clear error |
 | `yale_access_manager.reconcile_access` | Same fields plus a managed `access_id` | Confirms an existing loaded entry by reading only |
 | `yale_access_manager.delete_access` | `device_id`, managed `access_id` | Confirms removal |
+| `yale_access_manager.disable_access` | `device_id`, managed `access_id` | Confirms the PIN is disabled in Yale's API |
+| `yale_access_manager.enable_access` | `device_id`, managed `access_id` | Confirms an unexpired PIN is loaded |
+| `yale_access_manager.bind_person` | `device_id`, managed `access_id`, `person_entity_id`, `notification_entry_id` | Links stable identifiers |
+| `yale_access_manager.issue_access` | `device_id`, linked `person_entity_id` | Renews a ten-minute temporary PIN and sends it to the linked Companion phone; returns no PIN |
 
 For `temporary`, provide `starts_at` and `ends_at`. For `recurring`, provide
 `weekdays` (MO, TU, WE, TH, FR, SA, SU), `start_time` and `end_time`.
@@ -73,13 +82,39 @@ The lock's Yale Access Manager device receives three diagnostic count sensors:
 Home Assistant can represent the same lock separately for each integration.
 Actions accept its configured August or Yale Access Manager device and verify
 the lock identity and account association.
-Counts refresh every five minutes and after management operations. Requests wait
+Counts refresh every minute (15 seconds during an issued access) and after management operations. Requests wait
 up to three minutes for Yale's reported loading/removal state.
+
+`event.*_access_activity` records guest activity without PIN values. Its events
+include the stable `access_id`, Yale `userID`, linked person entity ID, timestamp
+and event type. It is an activity entity, not a presence tracker; keypad activity
+identifies the credential that operated the lock, not the human holding it.
+
+## On-demand access
+
+Create one managed guest with a temporary PIN, disable it and link it to a person
+and Companion phone in **Configure**. The issuance action replaces the old PIN
+with a random six-digit code valid for ten minutes, then sends it to that phone.
+It refuses a second simultaneous issuance. The Yale user ID and managed
+`access_id` remain stable across replacements. A confirmed Yale keypad unlock
+for that user starts revocation; the expiry is also programmed in Yale and
+an unconfirmed revocation is reconciled after Home Assistant restarts without
+blindly repeating a write. Yale cloud activity polling
+can lag, so this is **best-effort single use**, not a hardware-enforced one-time
+credential.
+
+The integration itself does not decide when a visitor may request access.
+Use a Home Assistant automation with independent camera, device presence and
+door checks. Keep any such automation disabled until the guest linkage,
+notification delivery and physical keypad behavior have been verified. Existing
+app-created permanent codes must be retired separately through Yale.
 
 ## Privacy and persistence
 
 - PIN values are not stored in entity state, attributes, options, responses,
   integration logs or the access journal. They are held temporarily in memory.
+- PINs necessarily pass through the Companion notification service and may be
+  visible on the recipient's phone or in Home Assistant service traces.
 - Native password fields hide the input visually. **A PIN passed in a script or
   automation can still appear in that script's configuration or execution trace.**
   Prefer the native management forms for manual access administration.
@@ -100,6 +135,10 @@ the Yale API on Yale Assure Lock 2. Server-reported `loaded` is not an independe
 physical keypad test. Permanent and weekly schedule validation, permissions,
 privacy, restart recovery and failure handling are covered by automated checks;
 broader real-device verification is still needed.
+
+The same temporary guest was disabled and re-enabled through Yale's API while
+retaining its `userID`, PIN record ID, partner ID, PIN and schedule. Physical
+rejection of its PIN while disabled has not yet been checked.
 
 The native Matter credential manager is bound to Matter services and does not
 provide a documented general hook for Yale. This integration uses native

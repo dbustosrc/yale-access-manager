@@ -35,7 +35,10 @@
           "create_access": "Create access",
           "update_access": "Replace access",
           "delete_access": "Delete access",
-          "reconcile_access": "Resolve pending operation"
+          "reconcile_access": "Resolve pending operation",
+          "disable_access": "Disable access",
+          "enable_access": "Enable access",
+          "bind_person": "Link person"
         }
       },
       "list_accesses": {
@@ -82,6 +85,35 @@
         "data": {
           "access_id": "Access"
         }
+      },
+      "disable_access": {
+        "title": "Disable access",
+        "description": "Select a managed access. Disabling retains its identity and association.",
+        "data": {
+          "access_id": "Managed guest"
+        }
+      },
+      "enable_access": {
+        "title": "Enable access",
+        "description": "Select a managed access. Disabling retains its identity and association.",
+        "data": {
+          "access_id": "Managed guest"
+        }
+      },
+      "bind_person": {
+        "title": "Link person",
+        "description": "Select a managed access. Disabling retains its identity and association.",
+        "data": {
+          "access_id": "Managed guest"
+        }
+      },
+      "person": {
+        "title": "Link person",
+        "description": "Link by identifiers without changing presence. The phone must belong to the person's associated account.",
+        "data": {
+          "person_entity_id": "Person",
+          "notification_entry_id": "Companion phone"
+        }
       }
     },
     "error": {
@@ -100,12 +132,17 @@
       "access_denied": "The August account must have owner access to this lock.",
       "rate_limited": "Yale is limiting requests. Try again later.",
       "not_managed": "This integration does not own that access.",
-      "invalid_response": "Yale returned an unexpected response. No completion is assumed."
+      "invalid_response": "Yale returned an unexpected response. No completion is assumed.",
+      "invalid_person": "Select a person and a Companion phone registered to the same account.",
+      "ambiguous_person": "Link exactly one managed guest to this person for this lock.",
+      "identity_changed": "The Yale identity changed. Review the guest before authorizing another access.",
+      "issue_failed": "Code delivery is unconfirmed. Access revocation was requested; inspect its state."
     },
     "abort": {
       "not_ready": "The integration must be loaded before managing access.",
       "cannot_connect": "Unable to read accesses from Yale.",
-      "no_managed_accesses": "Create an access with this integration first."
+      "no_managed_accesses": "Create an access with this integration first.",
+      "no_mobile_app": "Configure a Home Assistant Companion phone."
     }
   },
   "selector": {
@@ -138,6 +175,26 @@
       },
       "pending": {
         "name": "Pending access operations"
+      }
+    },
+    "event": {
+      "access_activity": {
+        "name": "Access activity",
+        "state_attributes": {
+          "event_type": {
+            "name": "Operation",
+            "state": {
+              "created": "Created",
+              "updated": "Updated",
+              "disabled": "Disabled",
+              "enabled": "Enabled",
+              "keypad_unlock": "Keypad unlock",
+              "issued": "Code issued",
+              "expired": "Validity ended",
+              "deleted": "Deleted"
+            }
+          }
+        }
       }
     }
   },
@@ -299,6 +356,70 @@
           "description": "Required for recurring access; same-day windows only."
         }
       }
+    },
+    "disable_access": {
+      "name": "Disable access",
+      "description": "Administrator only; retain the managed identity.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "The managed guest identifier."
+        }
+      }
+    },
+    "enable_access": {
+      "name": "Enable access",
+      "description": "Administrator only; retain the managed identity.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "The managed guest identifier."
+        }
+      }
+    },
+    "bind_person": {
+      "name": "Link person",
+      "description": "Administrator only; retain the managed identity.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "The managed guest identifier."
+        },
+        "person_entity_id": {
+          "name": "Person",
+          "description": "Person linked by its stable identifier."
+        },
+        "notification_entry_id": {
+          "name": "Companion phone",
+          "description": "mobile_app registration belonging to the person's account."
+        }
+      }
+    },
+    "issue_access": {
+      "name": "Issue temporary code",
+      "description": "Renew the PIN for ten minutes and send it to the linked phone. Revoke on identified use or expiry. Never return the PIN.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "person_entity_id": {
+          "name": "Person",
+          "description": "Person linked by its stable identifier."
+        }
+      }
     }
   },
   "exceptions": {
@@ -358,6 +479,18 @@
     },
     "update_rolled_back": {
       "message": "Replacement was rejected; the previous PIN was restored."
+    },
+    "invalid_person": {
+      "message": "Select a person and a Companion phone registered to the same account."
+    },
+    "ambiguous_person": {
+      "message": "Link exactly one managed guest to this person for this lock."
+    },
+    "identity_changed": {
+      "message": "The Yale identity changed. Review the guest before authorizing another access."
+    },
+    "issue_failed": {
+      "message": "Code delivery is unconfirmed. Access revocation was requested; inspect its state."
     }
   }
 }

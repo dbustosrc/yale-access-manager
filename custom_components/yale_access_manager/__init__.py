@@ -14,7 +14,7 @@ from .api import create_api
 from .const import ACCESS_TYPES, CONF_DEVICE, CONF_LOCK, CONF_SOURCE, DOMAIN, AccessError
 from .manager import AccessManager
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.EVENT]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 ACCESS_FIELDS = {
     vol.Required("name"): cv.string,
@@ -50,7 +50,15 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
             await manager.update(call.data["access_id"], dict(call.data))
         elif action == "reconcile_access":
             await manager.reconcile(call.data["access_id"], dict(call.data))
-        else:
+        elif action == "bind_person":
+            await manager.bind_person(call.data["access_id"], call.data["person_entity_id"], call.data["notification_entry_id"])
+        elif action in ("disable_access", "enable_access"):
+            await manager.set_enabled(call.data["access_id"], action == "enable_access")
+        elif action == "issue_access":
+            result = await manager.issue_access(call.data["person_entity_id"])
+            if call.return_response:
+                return result
+        elif action == "delete_access":
             await manager.delete(call.data["access_id"])
     except AccessError as exc:
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key=exc.code) from None
@@ -66,10 +74,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         "update_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string, **ACCESS_FIELDS},
         "reconcile_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string, **ACCESS_FIELDS},
         "delete_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
+        "disable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
+        "enable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
+        "bind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,
+                        vol.Required("person_entity_id"): cv.entity_id, vol.Required("notification_entry_id"): cv.string},
+        "issue_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
     }
     for action, schema in schemas.items():
         response = (SupportsResponse.ONLY if action == "list_accesses" else
-                    SupportsResponse.OPTIONAL if action == "create_access" else SupportsResponse.NONE)
+                    SupportsResponse.OPTIONAL if action in ("create_access", "issue_access") else SupportsResponse.NONE)
         service.async_register_admin_service(hass, DOMAIN, action, partial(handle_action, hass, action),
                                              schema=vol.Schema(schema), supports_response=response)
     return True

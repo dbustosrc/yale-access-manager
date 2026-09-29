@@ -2,7 +2,7 @@
 
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +25,7 @@ from yale_access_manager.const import DOMAIN, AccessError
 from yale_access_manager.manager import AccessManager
 from yale_access_manager.models import command, matches, records, saved, utc
 from yale_access_manager.sensor import AccessCount
+from yale_access_manager.event import AccessActivity
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -55,16 +56,22 @@ class SimulatedYale:
         self.pending = False
         self.closed = False
         self.reject_next_load = False
+        self.next_user_id = None
+        self.events = []
 
     async def locks(self):
         return {"lock": {"UserType": "superuser"}}
 
     async def detail(self, lock_id):
-        return {"supportsEntryCodes": True, "accessSchedulesAllowed": True}
+        return {"supportsEntryCodes": True, "accessSchedulesAllowed": True, "HouseID": "test-house"}
+
+    async def activities(self, house_id):
+        return deepcopy(self.events)
 
     async def pins(self, lock_id):
         return {"loaded": deepcopy([pin for pin in self.entries if pin["state"] == "loaded"]),
-                "created": deepcopy([pin for pin in self.entries if pin["state"] == "created"])}
+                "created": deepcopy([pin for pin in self.entries if pin["state"] == "created"]),
+                "disabled": deepcopy([pin for pin in self.entries if pin["state"] == "disabled"])}
 
     async def write(self, lock_id, payload):
         self.writes.append(deepcopy(payload))
@@ -77,8 +84,14 @@ class SimulatedYale:
             raise AccessError("write_rejected")
         if payload["action"] == "delete":
             self.entries = [pin for pin in self.entries if pin.get("partnerUserID") != partner_id]
+        elif payload["action"] in ("enable", "disable"):
+            for pin in self.entries:
+                if pin.get("partnerUserID") == partner_id:
+                    pin["state"] = "loaded" if payload["action"] == "enable" else "disabled"
         else:
-            self.entries.append({**payload, "_id": partner_id, "userID": "synthetic-user",
+            user_id = self.next_user_id or "user-" + partner_id
+            self.next_user_id = None
+            self.entries.append({**payload, "_id": partner_id, "userID": user_id,
                                  "state": "created" if self.pending else "loaded"})
         return {"transactionID": "synthetic-transaction"}
 
@@ -206,6 +219,114 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.exception.code, "update_rolled_back")
         self.assertEqual(self.api.entries[-1]["pin"], TEMP["pin"])
         self.assertEqual(self.manager.accesses[access_id]["operation"], "ready")
+
+    async def test_persistent_guest_issue_use_and_revocation(self):
+        access_id = await self.manager.create(TEMP)
+        yale_id = self.manager.accesses[access_id]["user_id"]
+        person_entry = SimpleNamespace(platform="person", unique_id="person-1")
+        registry = SimpleNamespace(async_get=lambda entity_id: person_entry if entity_id == "person.guest" else None,
+                                   async_get_entity_id=lambda domain, platform, unique_id:
+                                   "person.guest" if (domain, platform, unique_id) == ("person", "person", "person-1") else None)
+        self.hass.states.async_set("person.guest", "home", {"user_id": "owner-1"})
+        phone = SimpleNamespace(entry_id="phone-1", domain="mobile_app", title="Test Phone", state=ConfigEntryState.LOADED,
+                                data={"user_id": "owner-1", "device_name": "Test Phone"})
+        wrong_phone = SimpleNamespace(entry_id="phone-2", domain="mobile_app", title="Other Phone", state=ConfigEntryState.LOADED,
+                                      data={"user_id": "other-user", "device_name": "Other Phone"})
+        self.entries.update({"phone-1": phone, "phone-2": wrong_phone})
+        delivered = []
+
+        async def notify(call):
+            delivered.append(call.data)
+
+        self.hass.services.async_register("notify", "mobile_app_test_phone", notify)
+        with patch("yale_access_manager.manager.er.async_get", return_value=registry):
+            flow = AccessOptionsFlow()
+            flow.hass = self.hass
+            flow.flow_id = "person-link-flow"
+            flow.handler = "manager"
+            flow._access_id = access_id
+            link_form = await flow.async_step_person()
+            self.assertEqual(link_form["step_id"], "person")
+            link_form["data_schema"]({"person_entity_id": "person.guest", "notification_entry_id": "phone-1"})
+            with self.assertRaises(AccessError):
+                await self.manager.bind_person(access_id, "person.guest", "phone-2")
+            await self.manager.bind_person(access_id, "person.guest", "phone-1")
+            self.assertEqual(self.manager.accesses[access_id]["user_id"], yale_id)
+            await self.manager.set_enabled(access_id, False)
+            self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "disabled")
+            self.assertEqual(self.manager.accesses[access_id]["user_id"], yale_id)
+            issued = await self.manager.issue_access("person.guest")
+            self.assertEqual(issued["access_id"], access_id)
+            self.assertNotIn("pin", json.dumps(issued))
+            self.assertEqual(len(delivered), 1)
+            self.assertIn("código", delivered[0]["message"])
+            self.assertEqual(self.manager.accesses[access_id]["user_id"], yale_id)
+            self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "loaded")
+            with self.assertRaises(AccessError):
+                await self.manager.issue_access("person.guest")
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000) + 1000
+            self.api.events = [{"id": "synthetic-activity", "timestamp": now_ms,
+                                "deviceID": "lock", "action": "pin_unlock", "user": {"UserID": yale_id}}]
+            await self.manager.maintain()
+            self.assertIn("synthetic-activity", self.manager.seen_activities)
+            self.assertIsNone(self.manager.accesses[access_id].get("lease"), self.manager.accesses[access_id])
+            self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "disabled")
+            self.assertEqual(self.manager.accesses[access_id]["user_id"], yale_id)
+            self.assertEqual(len(delivered), 2)  # PIN delivery and notification clearing.
+            self.assertNotIn("pin", json.dumps(self.store.data))
+            await self.manager.maintain()
+            self.assertEqual(len(delivered), 2)
+            self.api.next_user_id = "unexpected-user"
+            with self.assertRaises(AccessError):
+                await self.manager.issue_access("person.guest")
+            self.assertEqual(len(delivered), 2)
+            self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "disabled")
+            self.assertEqual(self.manager.accesses[access_id]["operation"], "unknown")
+
+    async def test_expired_lease_recovered_after_restart_without_replaying_write(self):
+        access_id = await self.manager.create(TEMP)
+        before = self.manager.accesses[access_id]["user_id"]
+        started = datetime.now(timezone.utc) - timedelta(minutes=2)
+        self.manager.accesses[access_id]["lease"] = {
+            "started_at": started.isoformat(), "expires_at": (started + timedelta(minutes=1)).isoformat(), "revoke": False}
+        self.manager.seen_activities = None
+        await self.manager.save()
+        restarted = AccessManager(self.hass, self.entry, self.api, store=self.store)
+        restarted.poll_interval = 0
+        await restarted.load()
+        writes = len(self.api.writes)
+        await restarted.maintain()
+        self.assertEqual(len(self.api.writes), writes + 1)
+        self.assertEqual(self.api.writes[-1]["action"], "disable")
+        self.assertEqual(restarted.owned(await restarted.raw(), access_id)["state"], "disabled")
+        self.assertIsNone(restarted.accesses[access_id].get("lease"))
+        self.assertEqual(restarted.accesses[access_id]["user_id"], before)
+        await restarted.async_shutdown()
+
+    async def test_uncertain_disable_is_reconciled_without_a_second_post(self):
+        access_id = await self.manager.create(TEMP)
+        started = datetime.now(timezone.utc) - timedelta(minutes=2)
+        self.manager.accesses[access_id]["lease"] = {
+            "started_at": started.isoformat(), "expires_at": (started + timedelta(minutes=1)).isoformat(),
+            "revoke": True, "disable_requested": False}
+        await self.manager.save()
+        self.api.next_failure = AccessError("outcome_unknown", uncertain=True)
+        writes = len(self.api.writes)
+        await self.manager.maintain()
+        self.assertEqual(len(self.api.writes), writes + 1)
+        self.assertTrue(self.manager.accesses[access_id]["lease"]["disable_requested"])
+        await self.manager.maintain()
+        self.assertEqual(len(self.api.writes), writes + 1)
+        self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "loaded")
+        self.api.entries[-1]["state"] = "disabled"
+        await self.manager.maintain()
+        self.assertIsNone(self.manager.accesses[access_id].get("lease"))
+        self.assertEqual(len(self.api.writes), writes + 1)
+
+    async def test_event_entity_is_not_presence_tracker(self):
+        activity = AccessActivity(self.entry)
+        self.assertEqual(activity.event_types[-1], "deleted")
+        self.assertEqual(activity.device_info["identifiers"], {("august", "lock")})
 
     async def test_native_admin_services_and_target_validation(self):
         await async_setup(self.hass, {})

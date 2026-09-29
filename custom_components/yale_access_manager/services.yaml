@@ -151,3 +151,64 @@ delete_access:
       required: true
       selector:
         text:
+
+disable_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+
+enable_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+
+bind_person:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+    person_entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            domain: person
+    notification_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: mobile_app
+
+issue_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    person_entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            domain: person

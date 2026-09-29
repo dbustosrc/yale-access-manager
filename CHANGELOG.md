@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Link each managed guest to a Home Assistant person and a Companion phone using stable account and Yale user identifiers.
+- Add disable and enable actions that keep the managed guest and its Yale identity.
+- Add a ten-minute code issuance action that renews a managed guest PIN and sends it to the linked phone without returning the PIN to callers.
+- Revoke issued access when its Yale activity is attributed to the managed guest, or when its Yale schedule expires; reconcile unconfirmed revocations after restarts without repeating writes blindly.
+- Expose PIN-free activity through a native event entity on the lock device.
+
+Yale API state transitions and user-ID persistence were checked on a temporary
+managed guest. Physical keypad rejection while disabled remains unverified.
+
 ## 0.1.1
 
 - Fix all access-management actions rejecting a correctly selected lock when Home Assistant assigns separate device IDs to August and Yale Access Manager.
