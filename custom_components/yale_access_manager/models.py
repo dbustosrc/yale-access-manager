@@ -34,8 +34,10 @@ def command(data: dict, *, now: datetime | None = None, timezone_name: str = "UT
     if kind not in ACCESS_TYPES:
         raise AccessError("invalid_schedule")
     first, _, last = name.partition(" ")
-    result = {"pin": pin, "firstName": first, "lastName": last,
+    result = {"pin": pin, "firstName": first,
               "action": "load", "accessType": kind, "retry": False}
+    if last:
+        result["lastName"] = last
     if kind == "temporary":
         start, end = utc(data.get("starts_at", ""), timezone_name), utc(data.get("ends_at", ""), timezone_name)
         if start >= end or datetime.fromisoformat(end.replace("Z", "+00:00")) <= (now or datetime.now(timezone.utc)):
@@ -84,10 +86,12 @@ def saved(command_data: dict) -> dict:
     """Only non-secret metadata is persisted in the operation journal."""
     return {key: command_data[key] for key in
             ("firstName", "lastName", "accessType", "accessTimes", "accessRecurrence")
-            if key in command_data and command_data[key] is not None}
+            if key in command_data and command_data[key] is not None
+            and (key != "lastName" or command_data[key])}
 
 
 def matches(pin: dict, desired: dict) -> bool:
     return (pin.get("state") == "loaded" and pin.get("pin") == desired["pin"]
+            and (pin.get("lastName") or "") == (desired.get("lastName") or "")
             and all((pin.get(key) or "") == value if key in ("firstName", "lastName") else pin.get(key) == value
                     for key, value in saved(desired).items()))

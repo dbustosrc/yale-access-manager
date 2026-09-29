@@ -123,6 +123,11 @@ class ModelChecks(unittest.TestCase):
             command({"name": "Overnight", "pin": "123456", "access_type": "recurring",
                      "weekdays": ["MO"], "start_time": "23:00", "end_time": "06:00"}, now=NOW)
         self.assertNotIn("accessTimes", command({"name": "Permanent", "pin": "123456", "access_type": "always"}, now=NOW))
+        single_name = command({"name": "Guest", "pin": "234567", "access_type": "always"}, now=NOW)
+        self.assertNotIn("lastName", single_name)
+        self.assertNotIn("lastName", saved({**single_name, "lastName": ""}))
+        self.assertTrue(matches({**single_name, "state": "loaded", "lastName": None}, single_name))
+        self.assertFalse(matches({**single_name, "state": "loaded", "lastName": "Different"}, single_name))
         self.assertEqual(saved({"firstName": "Guest", "lastName": None, "accessType": "always", "accessTimes": None}),
                          {"firstName": "Guest", "accessType": "always"})
         self.assertTrue(matches({"state": "loaded", "pin": "123456", "firstName": "Guest", "lastName": None,
@@ -187,6 +192,19 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         await restarted.delete(access_id)
         await restarted.async_shutdown()
         self.assertEqual(self.api.entries, [baseline])
+
+    async def test_single_word_name_create_and_replace_never_send_empty_surname(self):
+        data = {"name": "Guest", "pin": "234567", "access_type": "always"}
+        access_id = await self.manager.create(data)
+        await self.manager.update(access_id, {**data, "name": "Renamed", "pin": "345678"})
+        self.api.reject_next_load = True
+        with self.assertRaises(AccessError) as result:
+            await self.manager.update(access_id, {**data, "pin": "456789"})
+        self.assertEqual(result.exception.code, "update_rolled_back")
+        for payload in self.api.writes:
+            if payload["action"] == "load":
+                self.assertNotIn("lastName", payload)
+        self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["firstName"], "Renamed")
 
     async def test_interruption_and_definitive_rejection(self):
         self.api.pending = True

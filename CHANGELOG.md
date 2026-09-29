@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Fix Yale rejecting guests with a single-word name: omit the optional surname instead of sending an empty field.
+- Apply the same handling to replacement and rollback, while verifying that the loaded guest has the expected name.
+
 ## 0.2.2
 
 - Display Yale's original HTTP error response in management forms and action errors instead of replacing it with a generic rejection message.
