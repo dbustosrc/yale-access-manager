@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Allow linking app-created and owner accesses to a Home Assistant person without granting PIN-management permissions or writing to Yale.
+- Make the Companion phone optional for identity linkage; validate account ownership whenever a phone is selected.
+- Retain external credential and Yale user identifiers separately from managed accesses, rejecting ambiguous or changed identities.
+- Report linked keypad activity for external and persistent managed guests even outside a temporary code lease.
+
 ## 0.2.4
 
 - Add an explicit pending-access cancellation action and native form that use the original PIN and managed partner ID, including when Yale no longer lists the attempted load.

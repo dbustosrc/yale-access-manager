@@ -125,10 +125,10 @@ class AccessOptionsFlow(OptionsFlow):
                 return self.async_abort(reason="yale_error", description_placeholders={"error": exc.detail})
             return self.async_abort(reason="cannot_connect")
         choices = [{"value": item["access_id"], "label": f"{item['name']} · {item['state']} · {item['operation']}"}
-                   for item in listing["accesses"] if item["managed"]
+                   for item in listing["accesses"] if (item["managed"] or step_id == "bind_person")
                    and (step_id != "cancel_pending_access" or item["operation"] != "ready")]
         if not choices:
-            return self.async_abort(reason="no_managed_accesses")
+            return self.async_abort(reason="no_accesses" if step_id == "bind_person" else "no_managed_accesses")
         return self.async_show_form(step_id=step_id, errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
             vol.Required("access_id"): selector.SelectSelector(selector.SelectSelectorConfig(options=choices))}))
 
@@ -171,19 +171,17 @@ class AccessOptionsFlow(OptionsFlow):
         placeholders = {}
         if user_input is not None:
             try:
-                await self.manager.bind_person(self._access_id, user_input["person_entity_id"], user_input["notification_entry_id"])
+                await self.manager.bind_person(self._access_id, user_input["person_entity_id"], user_input.get("notification_entry_id"))
                 return self.async_create_entry(title="", data={})
             except AccessError as exc:
                 errors["base"] = "yale_error" if exc.detail else exc.code
                 placeholders = {"error": exc.detail} if exc.detail else {}
         phones = [{"value": entry.entry_id, "label": entry.title} for entry in self.hass.config_entries.async_entries("mobile_app")
                   if entry.state is ConfigEntryState.LOADED]
-        if not phones:
-            return self.async_abort(reason="no_mobile_app")
-        return self.async_show_form(step_id="person", errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
-            vol.Required("person_entity_id"): selector.EntitySelector(selector.EntitySelectorConfig(filter={"domain": "person"})),
-            vol.Required("notification_entry_id"): selector.SelectSelector(selector.SelectSelectorConfig(options=phones)),
-        }))
+        fields = {vol.Required("person_entity_id"): selector.EntitySelector(selector.EntitySelectorConfig(filter={"domain": "person"}))}
+        if phones:
+            fields[vol.Optional("notification_entry_id")] = selector.SelectSelector(selector.SelectSelectorConfig(options=phones))
+        return self.async_show_form(step_id="person", errors=errors, description_placeholders=placeholders, data_schema=vol.Schema(fields))
 
     async def _details(self, user_input=None, errors=None, detail=None):
         if user_input is not None:

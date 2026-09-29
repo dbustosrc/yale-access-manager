@@ -104,9 +104,9 @@
       },
       "bind_person": {
         "title": "Vincular persona",
-        "description": "Selecciona un acceso gestionado. La identidad y su vinculación se conservan al desactivar.",
+        "description": "Selecciona un acceso gestionado o creado en Yale, incluido un propietario. La vinculación no cambia su PIN, rol ni permisos.",
         "data": {
-          "access_id": "Invitado gestionado"
+          "access_id": "Acceso Yale"
         }
       },
       "cancel_pending_access": {
@@ -125,7 +125,7 @@
       },
       "person": {
         "title": "Vincular persona",
-        "description": "Vinculación por identificadores, sin cambiar presencia. El teléfono debe pertenecer a la cuenta asociada a la persona.",
+        "description": "Vincula por identificadores sin cambiar presencia ni accesos en Yale. El teléfono es opcional para vincular y obligatorio para enviar códigos; debe pertenecer a la cuenta de la persona.",
         "data": {
           "person_entity_id": "Persona",
           "notification_entry_id": "Teléfono Companion"
@@ -150,7 +150,7 @@
       "rate_limited": "Yale está limitando las solicitudes.",
       "not_managed": "La integración no administra ese acceso.",
       "invalid_response": "Yale devolvió una respuesta inesperada; no se asume que la operación terminó.",
-      "invalid_person": "Selecciona una persona y un teléfono Companion registrado en su misma cuenta.",
+      "invalid_person": "Selecciona una persona válida. Si eliges un teléfono Companion, debe pertenecer a su cuenta.",
       "ambiguous_person": "Vincula exactamente un invitado gestionado a esta persona para esta cerradura.",
       "identity_changed": "La identidad Yale cambió. Revisa el invitado antes de autorizar otro acceso.",
       "issue_failed": "No se confirmó el envío del código. Se solicitó revocar el acceso; revisa su estado."
@@ -160,6 +160,7 @@
       "yale_error": "{error}",
       "cannot_connect": "No se pudieron consultar los accesos en Yale.",
       "no_managed_accesses": "Primero crea un acceso con esta integración.",
+      "no_accesses": "Yale no devuelve accesos para vincular.",
       "no_mobile_app": "Configura un teléfono con Home Assistant Companion."
     }
   },
@@ -405,7 +406,7 @@
     },
     "bind_person": {
       "name": "Vincular persona",
-      "description": "Solo administradores; conserva la identidad gestionada.",
+      "description": "Vincula una identidad Yale gestionada o externa, incluido un propietario. No concede permisos de gestión ni escribe en Yale.",
       "fields": {
         "device_id": {
           "name": "Cerradura",
@@ -413,7 +414,7 @@
         },
         "access_id": {
           "name": "ID del acceso",
-          "description": "Identificador del invitado gestionado."
+          "description": "ID gestionado o externo devuelto por Listar accesos."
         },
         "person_entity_id": {
           "name": "Persona",
@@ -421,7 +422,7 @@
         },
         "notification_entry_id": {
           "name": "Teléfono Companion",
-          "description": "Registro mobile_app perteneciente a la cuenta de la persona."
+          "description": "Opcional para vincular; necesario para enviar códigos. Registro mobile_app perteneciente a la cuenta de la persona."
         }
       }
     },
@@ -533,7 +534,7 @@
       "message": "El reemplazo fue rechazado; se restauró el PIN anterior."
     },
     "invalid_person": {
-      "message": "Selecciona una persona y un teléfono Companion registrado en su misma cuenta."
+      "message": "Selecciona una persona válida. Si eliges un teléfono Companion, debe pertenecer a su cuenta."
     },
     "ambiguous_person": {
       "message": "Vincula exactamente un invitado gestionado a esta persona para esta cerradura."

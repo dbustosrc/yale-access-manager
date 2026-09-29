@@ -36,6 +36,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
         self.store = store or Store(hass, 1, f"{DOMAIN}.{sha256(self.lock_id.encode()).hexdigest()}",
                                    private=True, atomic_writes=True)
         self.accesses: dict[str, dict] = {}
+        self.external_links: dict[str, dict] = {}
         self.operation_lock = asyncio.Lock()
         self.poll_interval = 5
         self.poll_timeout = 180
@@ -49,6 +50,15 @@ class AccessManager(DataUpdateCoordinator[dict]):
             if not isinstance(data, dict) or not isinstance(data.get("accesses"), dict):
                 raise AccessError("journal_invalid")
             self.accesses = data["accesses"]
+            self.external_links = data.get("external_links", {})
+            if not isinstance(self.external_links, dict):
+                raise AccessError("journal_invalid")
+            for key, value in self.external_links.items():
+                if (not isinstance(key, str) or not key.startswith("external:") or not key[9:]
+                        or not isinstance(value, dict) or not {"user_id", "person_unique_id"} <= set(value)
+                        or set(value) - {"user_id", "person_unique_id", "notification_entry_id"}
+                        or any(not isinstance(field, str) or not field for field in value.values())):
+                    raise AccessError("journal_invalid")
             self.seen_activities = data.get("seen_activities")
             if self.seen_activities is not None and (not isinstance(self.seen_activities, list)
                     or any(not isinstance(value, str) for value in self.seen_activities)):
@@ -99,14 +109,16 @@ class AccessManager(DataUpdateCoordinator[dict]):
             raise AccessError("invalid_response")
 
     async def save(self) -> None:
-        await self.store.async_save({"accesses": self.accesses, "seen_activities": self.seen_activities})
+        await self.store.async_save({"accesses": self.accesses, "external_links": self.external_links,
+                                    "seen_activities": self.seen_activities})
 
     def person_entity(self, access_id: str) -> str | None:
-        unique_id = self.accesses[access_id].get("person_unique_id")
+        record = self.accesses.get(access_id, self.external_links.get(access_id, {}))
+        unique_id = record.get("person_unique_id")
         return er.async_get(self.hass).async_get_entity_id("person", "person", unique_id) if unique_id else None
 
     def emit(self, access_id: str, kind: str, **extra) -> None:
-        record = self.accesses[access_id]
+        record = self.accesses.get(access_id, self.external_links.get(access_id, {}))
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self.lock_id}_activity", {
             "event_type": kind, "access_id": access_id, "yale_user_id": record.get("user_id"),
             "person_entity_id": self.person_entity(access_id),
@@ -135,12 +147,15 @@ class AccessManager(DataUpdateCoordinator[dict]):
         present = set()
         for pin in items:
             key = known.get(pin.get("partnerUserID"))
+            external_id = f"external:{pin.get('_id', '')}"
+            external_link = self.external_links.get(external_id, {})
+            linked_id = key or (external_id if external_link.get("user_id") == pin.get("userID") else None)
             if key:
                 present.add(key)
-            result.append({**metadata(pin), "access_id": key or f"external:{pin.get('_id', '')}",
+            result.append({**metadata(pin), "access_id": key or external_id,
                            "managed": key is not None,
                            "operation": self.accesses[key]["operation"] if key else "read_only",
-                           "person_entity_id": self.person_entity(key) if key else None,
+                           "person_entity_id": self.person_entity(linked_id) if linked_id else None,
                            "expires_at": (self.accesses[key].get("lease") or {}).get("expires_at") if key else None})
         for key, record in self.accesses.items():
             if key not in present:
@@ -286,25 +301,38 @@ class AccessManager(DataUpdateCoordinator[dict]):
         await self.save()
         self.emit(access_id, "updated")
 
-    async def bind_person(self, access_id: str, person_entity_id: str, notification_entry_id: str) -> None:
+    async def bind_person(self, access_id: str, person_entity_id: str, notification_entry_id: str | None = None) -> None:
         async with self.operation_lock:
             record = self.accesses.get(access_id)
-            if record is None:
-                raise AccessError("not_managed")
+            items = await self.raw()
+            if record is not None:
+                pin = self.owned(items, access_id)
+            else:
+                found = [item for item in items if f"external:{item.get('_id', '')}" == access_id]
+                if not access_id.startswith("external:") or len(found) != 1:
+                    raise AccessError("invalid_response")
+                pin = found[0]
+                if any(value["partner_id"] == pin.get("partnerUserID") for value in self.accesses.values()):
+                    raise AccessError("not_managed")
+                record = self.external_links.get(access_id, {})
             person = er.async_get(self.hass).async_get(person_entity_id)
             state = self.hass.states.get(person_entity_id)
-            phone = self.hass.config_entries.async_get_entry(notification_entry_id)
+            phone = self.hass.config_entries.async_get_entry(notification_entry_id) if notification_entry_id else None
             if (person is None or person.platform != "person" or not person_entity_id.startswith("person.")
-                    or state is None or not state.attributes.get("user_id") or phone is None
-                    or phone.domain != "mobile_app" or phone.data.get("user_id") != state.attributes["user_id"]):
+                    or state is None):
                 raise AccessError("invalid_person")
-            if any(key != access_id and value.get("person_unique_id") == person.unique_id for key, value in self.accesses.items()):
+            if notification_entry_id and (phone is None or phone.domain != "mobile_app"
+                    or phone.state is not ConfigEntryState.LOADED or not state.attributes.get("user_id")
+                    or phone.data.get("user_id") != state.attributes["user_id"]):
+                raise AccessError("invalid_person")
+            links = {**self.accesses, **self.external_links}
+            if access_id in self.accesses and any(key != access_id and value.get("person_unique_id") == person.unique_id
+                                                 for key, value in self.accesses.items()):
                 raise AccessError("ambiguous_person")
-            pin = self.owned(await self.raw(), access_id)
             user_id = pin.get("userID") if pin else None
             if not isinstance(user_id, str) or not user_id:
                 raise AccessError("invalid_response")
-            if any(key != access_id and value.get("user_id") == user_id for key, value in self.accesses.items()):
+            if any(key != access_id and value.get("user_id") == user_id for key, value in links.items()):
                 raise AccessError("ambiguous_person")
             if record.get("user_id", user_id) != user_id:
                 raise AccessError("identity_changed")
@@ -312,7 +340,12 @@ class AccessManager(DataUpdateCoordinator[dict]):
                 raise AccessError("operation_pending")
             if record.get("person_unique_id") != person.unique_id:
                 record.pop("visit", None)
-            record.update(user_id=user_id, person_unique_id=person.unique_id, notification_entry_id=phone.entry_id)
+                record.pop("notification_entry_id", None)
+            record.update(user_id=user_id, person_unique_id=person.unique_id)
+            if phone is not None:
+                record["notification_entry_id"] = phone.entry_id
+            if access_id not in self.accesses:
+                self.external_links[access_id] = record
             await self.save()
 
     def notification_service(self, access_id: str) -> str:
@@ -460,7 +493,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
 
     async def maintain(self) -> None:
         async with self.operation_lock:
-            if not self.accesses:
+            if not self.accesses and not self.external_links:
                 return
             events = await self.api.activities(self.house_id)
             def event_id(event):
@@ -477,7 +510,8 @@ class AccessManager(DataUpdateCoordinator[dict]):
                     continue
                 user = event.get("callingUser", event.get("user"))
                 actor = user.get("UserID") if isinstance(user, dict) else None
-                keys = [key for key, value in self.accesses.items() if actor and value.get("user_id") == actor]
+                keys = [key for key, value in {**self.accesses, **self.external_links}.items()
+                        if actor and value.get("user_id") == actor]
                 if len(keys) != 1:
                     continue
                 key = keys[0]
@@ -488,8 +522,9 @@ class AccessManager(DataUpdateCoordinator[dict]):
                     observed = datetime.fromtimestamp(stamp / 1000 if stamp > 1e12 else stamp, timezone.utc)
                 except (ValueError, OverflowError, OSError):
                     continue
-                lease = self.accesses[key].get("lease")
+                lease = self.accesses.get(key, {}).get("lease")
                 if not lease:
+                    self.emit(key, "keypad_unlock", activity_id=identifier, occurred_at=observed.isoformat())
                     continue
                 if datetime.fromisoformat(lease["started_at"]) <= observed <= datetime.fromisoformat(lease["expires_at"]):
                     self.emit(key, "keypad_unlock", activity_id=identifier, occurred_at=observed.isoformat())

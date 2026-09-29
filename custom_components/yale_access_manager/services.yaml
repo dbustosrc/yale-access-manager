@@ -211,7 +211,6 @@ bind_person:
           filter:
             domain: person
     notification_entry_id:
-      required: true
       selector:
         config_entry:
           integration: mobile_app

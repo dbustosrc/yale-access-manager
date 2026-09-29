@@ -41,9 +41,10 @@ Open the integration's **Configure/options** button in Devices & services:
   A rejection keeps the journal pending; it never just erases the record.
 - **Disable/enable access** changes keypad availability while retaining the guest
   and its Yale user ID. Do not enable an expired temporary schedule.
-- **Link person** connects one managed guest to a Home Assistant person and a
-  Companion phone registered to that person's HA account. Names are not used
-  as identity keys.
+- **Link person** connects a managed or app-created access, including an owner,
+  to a Home Assistant person by credential and Yale user IDs. A Companion
+  phone is optional for linkage and must belong to that person's HA account
+  when selected. Temporary code delivery still requires a linked phone.
 
 Permanent, temporary and weekly recurring access are supported. Temporary dates
 use Home Assistant's timezone. Recurring times use the lock's timezone in the
@@ -52,6 +53,11 @@ Yale app; a weekly interval must start and end within the same day.
 **App-created accesses are read-only.** Only accesses created by this integration
 can be changed or deleted. App invitations, owner roles, one-time PINs and
 fingerprint/RFID credentials are not supported.
+
+Read-only accesses can be linked to a person without becoming managed. Their
+linkage is stored separately in Home Assistant; no Yale PIN, schedule or role
+is changed. Keypad activity uses the Yale user ID, never a display-name match.
+If the external credential identity changes, explicitly review and relink it.
 
 Replacement uses **delete then load**, with a brief access interruption. A
 definitively rejected replacement attempts to restore the previous PIN. An
@@ -73,7 +79,7 @@ automation, and an explicit configured lock `device_id`.
 | `yale_access_manager.cancel_pending_access` | `device_id`, pending `access_id`, original `pin` | Requests deletion for the original partner and clears the journal only after Yale accepts it and a fresh read confirms absence |
 | `yale_access_manager.disable_access` | `device_id`, managed `access_id` | Confirms the PIN is disabled in Yale's API |
 | `yale_access_manager.enable_access` | `device_id`, managed `access_id` | Confirms an unexpired PIN is loaded |
-| `yale_access_manager.bind_person` | `device_id`, managed `access_id`, `person_entity_id`, `notification_entry_id` | Links stable identifiers |
+| `yale_access_manager.bind_person` | `device_id`, managed or external `access_id`, `person_entity_id`, optional `notification_entry_id` | Links stable identifiers without modifying Yale |
 | `yale_access_manager.issue_access` | `device_id`, linked `person_entity_id` | Renews a ten-minute temporary PIN and sends it to the linked Companion phone; returns no PIN |
 | `yale_access_manager.begin_visit` | `device_id`, linked `person_entity_id` | Reserves one question per visit and returns the verified Companion notify service, or `allowed: false` |
 | `yale_access_manager.end_visit` | `device_id`, linked `person_entity_id` | Clears the visit after departure; preserves the 30-minute cooldown |

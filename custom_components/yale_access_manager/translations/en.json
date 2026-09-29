@@ -104,9 +104,9 @@
       },
       "bind_person": {
         "title": "Link person",
-        "description": "Select a managed access. Disabling retains its identity and association.",
+        "description": "Select a managed or app-created Yale access, including an owner. Linking does not change its PIN, role or permissions.",
         "data": {
-          "access_id": "Managed guest"
+          "access_id": "Yale access"
         }
       },
       "cancel_pending_access": {
@@ -125,7 +125,7 @@
       },
       "person": {
         "title": "Link person",
-        "description": "Link by identifiers without changing presence. The phone must belong to the person's associated account.",
+        "description": "Link by identifiers without changing presence or Yale access. A phone is optional for linking and required for code delivery; it must belong to the person's account.",
         "data": {
           "person_entity_id": "Person",
           "notification_entry_id": "Companion phone"
@@ -150,7 +150,7 @@
       "rate_limited": "Yale is limiting requests. Try again later.",
       "not_managed": "This integration does not own that access.",
       "invalid_response": "Yale returned an unexpected response. No completion is assumed.",
-      "invalid_person": "Select a person and a Companion phone registered to the same account.",
+      "invalid_person": "Select a valid person. If a Companion phone is selected, it must belong to that person's account.",
       "ambiguous_person": "Link exactly one managed guest to this person for this lock.",
       "identity_changed": "The Yale identity changed. Review the guest before authorizing another access.",
       "issue_failed": "Code delivery is unconfirmed. Access revocation was requested; inspect its state."
@@ -160,6 +160,7 @@
       "yale_error": "{error}",
       "cannot_connect": "Unable to read accesses from Yale.",
       "no_managed_accesses": "Create an access with this integration first.",
+      "no_accesses": "Yale returned no accesses to link.",
       "no_mobile_app": "Configure a Home Assistant Companion phone."
     }
   },
@@ -405,7 +406,7 @@
     },
     "bind_person": {
       "name": "Link person",
-      "description": "Administrator only; retain the managed identity.",
+      "description": "Link a managed or external Yale identity, including an owner. Does not grant management permissions or write to Yale.",
       "fields": {
         "device_id": {
           "name": "Lock",
@@ -413,7 +414,7 @@
         },
         "access_id": {
           "name": "Access ID",
-          "description": "The managed guest identifier."
+          "description": "Managed or external ID returned by List accesses."
         },
         "person_entity_id": {
           "name": "Person",
@@ -421,7 +422,7 @@
         },
         "notification_entry_id": {
           "name": "Companion phone",
-          "description": "mobile_app registration belonging to the person's account."
+          "description": "Optional for linking; required for code delivery. mobile_app registration belonging to the person's account."
         }
       }
     },
@@ -533,7 +534,7 @@
       "message": "Replacement was rejected; the previous PIN was restored."
     },
     "invalid_person": {
-      "message": "Select a person and a Companion phone registered to the same account."
+      "message": "Select a valid person. If a Companion phone is selected, it must belong to that person's account."
     },
     "ambiguous_person": {
       "message": "Link exactly one managed guest to this person for this lock."

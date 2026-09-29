@@ -351,6 +351,59 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "disabled")
             self.assertEqual(self.manager.accesses[access_id]["operation"], "unknown")
 
+    async def test_external_owner_link_without_phone_preserves_read_only_access(self):
+        baseline = deepcopy(self.api.entries)
+        external_id = "external:external"
+        person = SimpleNamespace(platform="person", unique_id="owner-person")
+        registry = SimpleNamespace(async_get=lambda entity_id: person if entity_id == "person.owner" else None,
+                                   async_get_entity_id=lambda domain, platform, unique_id:
+                                   "person.owner" if unique_id == "owner-person" else None)
+        self.hass.states.async_set("person.owner", "home")  # Linking does not require a login account or phone.
+        with patch("yale_access_manager.manager.er.async_get", return_value=registry):
+            flow = AccessOptionsFlow()
+            flow.hass, flow.flow_id, flow.handler = self.hass, "external-owner-flow", "manager"
+            form = await flow.async_step_bind_person()
+            self.assertEqual(form["step_id"], "bind_person")
+            form["data_schema"]({"access_id": external_id})
+            form = await flow.async_step_bind_person({"access_id": external_id})
+            self.assertEqual(form["step_id"], "person")
+            form["data_schema"]({"person_entity_id": "person.owner"})
+            await async_setup(self.hass, {})
+            self.hass.auth = SimpleNamespace(async_get_user=self._get_user)
+            await self.hass.services.async_call(DOMAIN, "bind_person", {
+                "device_id": "device", "access_id": external_id, "person_entity_id": "person.owner"},
+                blocking=True, context=Context(user_id="admin"))
+            listing = await self.manager.list_accesses()
+            self.assertEqual(listing["accesses"][0]["person_entity_id"], "person.owner")
+            self.assertFalse(listing["accesses"][0]["managed"])
+            self.assertEqual(listing["accesses"][0]["operation"], "read_only")
+            self.assertEqual(self.manager.accesses, {})
+            self.assertEqual(self.api.entries, baseline)
+            self.assertEqual(self.api.writes, [])
+            self.assertNotIn("876543", json.dumps(self.store.data))
+            restarted = AccessManager(self.hass, self.entry, self.api, store=self.store)
+            await restarted.load()
+            self.assertEqual((await restarted.list_accesses())["accesses"][0]["person_entity_id"], "person.owner")
+            await restarted.maintain()  # Establish the activity baseline without replaying history.
+            self.api.events = [{"id": "external-keypad", "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                                "deviceID": "lock", "action": "pin_unlock", "user": {"UserID": "external-user"}}]
+            with patch("yale_access_manager.manager.async_dispatcher_send") as dispatch:
+                await restarted.maintain()
+                activity = dispatch.call_args.args[2]
+                self.assertEqual((activity["access_id"], activity["person_entity_id"]), (external_id, "person.owner"))
+            await restarted.async_shutdown()
+            for operation in (self.manager.delete(external_id), self.manager.set_enabled(external_id, False),
+                              self.manager.update(external_id, TEMP), self.manager.reconcile(external_id, TEMP),
+                              self.manager.issue_access("person.owner")):
+                with self.assertRaises(AccessError):
+                    await operation
+            self.assertEqual(self.api.writes, [])
+            self.api.entries[0]["userID"] = "changed-owner"
+            self.assertIsNone((await self.manager.list_accesses())["accesses"][0]["person_entity_id"])
+            with self.assertRaises(AccessError) as result:
+                await self.manager.bind_person(external_id, "person.owner")
+            self.assertEqual(result.exception.code, "identity_changed")
+
     async def test_expired_lease_recovered_after_restart_without_replaying_write(self):
         access_id = await self.manager.create(TEMP)
         before = self.manager.accesses[access_id]["user_id"]

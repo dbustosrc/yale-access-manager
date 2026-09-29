@@ -51,7 +51,7 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
         elif action == "reconcile_access":
             await manager.reconcile(call.data["access_id"], dict(call.data))
         elif action == "bind_person":
-            await manager.bind_person(call.data["access_id"], call.data["person_entity_id"], call.data["notification_entry_id"])
+            await manager.bind_person(call.data["access_id"], call.data["person_entity_id"], call.data.get("notification_entry_id"))
         elif action in ("disable_access", "enable_access"):
             await manager.set_enabled(call.data["access_id"], action == "enable_access")
         elif action == "issue_access":
@@ -87,7 +87,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         "disable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "enable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "bind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,
-                        vol.Required("person_entity_id"): cv.entity_id, vol.Required("notification_entry_id"): cv.string},
+                        vol.Required("person_entity_id"): cv.entity_id, vol.Optional("notification_entry_id"): cv.string},
         "issue_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
         "begin_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
         "end_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
