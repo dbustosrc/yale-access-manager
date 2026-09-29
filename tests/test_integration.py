@@ -14,7 +14,7 @@ import yaml
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.exceptions import Unauthorized
+from homeassistant.exceptions import ServiceValidationError, Unauthorized
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.config_entry_oauth2_flow import OAuth2Session
 
@@ -135,6 +135,13 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         self.hass.config_entries = SimpleNamespace(
             async_entries=lambda domain: [entry for entry in self.entries.values() if entry.domain == domain],
             async_get_entry=lambda key: self.entries.get(key), async_get_known_entry=lambda key: self.entries[key])
+        self.devices = {
+            "device": dr.DeviceEntry(id="device", config_entry_id="source", identifiers={("august", "lock")}),
+            "manager-device": dr.DeviceEntry(id="manager-device", config_entry_id="manager", identifiers={("august", "lock")}),
+            "other-account": dr.DeviceEntry(id="other-account", config_entry_id="other-source", identifiers={("august", "lock")}),
+            "other-lock": dr.DeviceEntry(id="other-lock", config_entry_id="manager", identifiers={("august", "other-lock")}),
+        }
+        self.hass.data[dr.DATA_REGISTRY] = SimpleNamespace(async_get=self.devices.get)
         await self.manager.load()
 
     async def asyncTearDown(self):
@@ -217,6 +224,39 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
 
     async def _get_user(self, user_id):
         return SimpleNamespace(is_admin=user_id == "admin")
+
+    async def test_actions_accept_per_integration_device_ids(self):
+        # Native DeviceEntry objects: same lock identity, distinct August/manager IDs.
+        self.assertNotEqual(self.devices["device"].id, self.devices["manager-device"].id)
+        await async_setup(self.hass, {})
+        self.hass.auth = SimpleNamespace(async_get_user=self._get_user)
+
+        async def invoke(action, data):
+            return await self.hass.services.async_call(
+                DOMAIN, action, data, blocking=True,
+                return_response=action in ("list_accesses", "create_access"),
+                context=Context(user_id="admin"))
+
+        for device_id in ("device", "manager-device"):
+            listing = await invoke("list_accesses", {"device_id": device_id})
+            self.assertEqual(len(listing["accesses"]), 1)
+        selected = {"device_id": "manager-device"}
+        result = await invoke("create_access", {**selected, **TEMP})
+        selected["access_id"] = result["access_id"]
+        changed = {**TEMP, "pin": "234567", "name": "Updated Guest"}
+        await invoke("update_access", {**selected, **changed})
+        await invoke("reconcile_access", {**selected, **changed})
+        await invoke("delete_access", selected)
+        self.assertEqual(len(self.api.entries), 1)
+
+        writes = len(self.api.writes)
+        for device_id in ("missing", "other-account", "other-lock"):
+            with self.assertRaises(ServiceValidationError):
+                await invoke("create_access", {"device_id": device_id, **TEMP})
+        self.entry.state = ConfigEntryState.NOT_LOADED
+        with self.assertRaises(ServiceValidationError):
+            await invoke("create_access", {"device_id": "manager-device", **TEMP})
+        self.assertEqual(len(self.api.writes), writes)
 
     async def test_native_options_menu_does_not_save_pin(self):
         flow = AccessOptionsFlow()

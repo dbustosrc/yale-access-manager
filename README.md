@@ -68,8 +68,11 @@ For `temporary`, provide `starts_at` and `ends_at`. For `recurring`, provide
 For `always`, schedule fields are not needed. PINs contain 4–8 ASCII digits;
 leading zeros are preserved.
 
-The same existing lock device receives three diagnostic count sensors:
+The lock's Yale Access Manager device receives three diagnostic count sensors:
 **Access entries**, **Managed accesses** and **Pending access operations**.
+Home Assistant can represent the same lock separately for each integration.
+Actions accept its configured August or Yale Access Manager device and verify
+the lock identity and account association.
 Counts refresh every five minutes and after management operations. Requests wait
 up to three minutes for Yale's reported loading/removal state.
 

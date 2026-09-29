@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Fix all access-management actions rejecting a correctly selected lock when Home Assistant assigns separate device IDs to August and Yale Access Manager.
+- Validate the selected device's Yale lock identity and configuration account; unrelated devices and unloaded entries remain rejected.
+
 ## 0.1.0
 
 - Add direct Yale/August cloud access management using an existing August OAuth account.

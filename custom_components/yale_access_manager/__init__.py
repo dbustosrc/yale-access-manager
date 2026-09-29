@@ -29,9 +29,13 @@ ACCESS_FIELDS = {
 
 
 async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
+    device = dr.async_get(hass).async_get(call.data[CONF_DEVICE])
+    # HA scopes device IDs per config entry; August and this integration differ.
     managers = [entry.runtime_data for entry in hass.config_entries.async_entries(DOMAIN)
                 if entry.state is ConfigEntryState.LOADED
-                and entry.data[CONF_DEVICE] == call.data[CONF_DEVICE]]
+                and device is not None
+                and ("august", entry.data[CONF_LOCK]) in device.identifiers
+                and device.config_entry_id in (entry.entry_id, entry.data[CONF_SOURCE])]
     if len(managers) != 1:
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="unknown_device")
     manager = managers[0]
@@ -94,7 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
     entry.runtime_data = manager
     entry.async_on_unload(manager.close)
-    # Add this config entry to the same registered physical device.
+    # Register this integration's device using the same physical lock identity.
     dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id,
                                           identifiers={("august", entry.data[CONF_LOCK])})
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
