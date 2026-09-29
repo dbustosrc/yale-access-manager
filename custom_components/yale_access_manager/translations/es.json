@@ -1,0 +1,363 @@
+{
+  "title": "Yale Access Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar una cerradura Yale",
+        "description": "Selecciona una cuenta August existente y su cerradura. La cuenta debe ser propietaria de la cerradura. No se guardan credenciales nuevas.",
+        "data": {
+          "august_entry_id": "Cuenta August",
+          "device_id": "Cerradura Yale"
+        }
+      }
+    },
+    "error": {
+      "unknown_device": "La cerradura no pertenece a la cuenta seleccionada.",
+      "source_unavailable": "Configura y activa la integración August primero.",
+      "source_auth": "Vuelve a autenticar la integración August existente.",
+      "access_denied": "La cuenta August debe tener acceso de propietario.",
+      "unsupported_lock": "Esta cerradura no admite códigos de acceso.",
+      "cannot_connect": "No se pudo conectar con Yale.",
+      "rate_limited": "Yale está limitando las solicitudes. Inténtalo más tarde.",
+      "invalid_response": "Yale devolvió una respuesta inesperada."
+    },
+    "abort": {
+      "already_configured": "Esta cerradura ya está configurada.",
+      "no_august": "Configura la integración oficial August antes de añadir Yale Access Manager."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Administrar accesos",
+        "menu_options": {
+          "list_accesses": "Ver accesos",
+          "create_access": "Crear acceso",
+          "update_access": "Reemplazar acceso",
+          "delete_access": "Eliminar acceso",
+          "reconcile_access": "Resolver operación pendiente"
+        }
+      },
+      "list_accesses": {
+        "title": "Accesos",
+        "description": "Nombre | tipo | estado Yale | operación | ID de acceso\n\n{accesses}\n\nLos accesos read_only pertenecen a la app Yale u otro administrador. Pulsa Enviar para volver al menú."
+      },
+      "update_access": {
+        "title": "Elegir acceso para reemplazar",
+        "description": "Solo se modifican accesos de esta integración. Se elimina el PIN anterior antes de cargar el nuevo; habrá una breve interrupción del acceso.",
+        "data": {
+          "access_id": "Acceso"
+        }
+      },
+      "delete_access": {
+        "title": "Eliminar acceso administrado",
+        "description": "Al enviar se elimina el acceso seleccionado de la cerradura. Los accesos creados desde la app están protegidos.",
+        "data": {
+          "access_id": "Acceso"
+        }
+      },
+      "details": {
+        "title": "Datos del acceso",
+        "description": "Introduce un PIN nuevo de 4 a 8 dígitos. No se guarda en las opciones de la integración ni en estados de entidades.",
+        "data": {
+          "name": "Nombre del invitado",
+          "pin": "PIN nuevo",
+          "access_type": "Tipo de acceso"
+        }
+      },
+      "schedule": {
+        "title": "Horario de acceso",
+        "description": "Las fechas temporales usan la zona horaria de Home Assistant. Los horarios semanales usan la zona horaria de la cerradura configurada en Yale; no se admiten franjas que crucen medianoche.",
+        "data": {
+          "starts_at": "Inicio",
+          "ends_at": "Fin",
+          "weekdays": "Días de la semana",
+          "start_time": "Inicio diario",
+          "end_time": "Fin diario"
+        }
+      },
+      "reconcile_access": {
+        "title": "Verificar un acceso cargado",
+        "description": "Introduce el PIN, nombre y horario que deben estar cargados. Esta operación solo consulta Yale; no repite escrituras.",
+        "data": {
+          "access_id": "Acceso"
+        }
+      }
+    },
+    "error": {
+      "invalid_pin": "El PIN debe tener de 4 a 8 dígitos ASCII.",
+      "invalid_name": "Introduce un nombre de 1 a 80 caracteres.",
+      "invalid_schedule": "Revisa fechas, días y horas. El fin debe ser posterior al inicio y el acceso temporal no puede estar vencido.",
+      "unsupported_schedule": "Esta cerradura no admite horarios de acceso.",
+      "duplicate_pin": "Ese PIN ya pertenece a otro acceso de la cerradura.",
+      "operation_pending": "La operación anterior sigue sin resolverse. Consulta los accesos y vuelve más tarde; no repitas una creación a ciegas.",
+      "outcome_unknown": "Yale no ha confirmado la operación. Consulta los accesos antes de hacer otro cambio.",
+      "write_rejected": "Yale rechazó el cambio. Revisa los datos y la capacidad de la cerradura.",
+      "update_rolled_back": "Yale rechazó el reemplazo; el PIN anterior fue restaurado.",
+      "cannot_connect": "No se pudo conectar con Yale.",
+      "source_auth": "Vuelve a autenticar la integración August existente.",
+      "source_unavailable": "La integración August de origen no está disponible.",
+      "access_denied": "Se requiere acceso de propietario.",
+      "rate_limited": "Yale está limitando las solicitudes.",
+      "not_managed": "La integración no administra ese acceso.",
+      "invalid_response": "Yale devolvió una respuesta inesperada; no se asume que la operación terminó."
+    },
+    "abort": {
+      "not_ready": "La integración debe estar activa para administrar accesos.",
+      "cannot_connect": "No se pudieron consultar los accesos en Yale.",
+      "no_managed_accesses": "Primero crea un acceso con esta integración."
+    }
+  },
+  "selector": {
+    "access_type": {
+      "options": {
+        "always": "Permanente",
+        "temporary": "Temporal",
+        "recurring": "Recurrente semanal"
+      }
+    },
+    "weekdays": {
+      "options": {
+        "MO": "Lunes",
+        "TU": "Martes",
+        "WE": "Miércoles",
+        "TH": "Jueves",
+        "FR": "Viernes",
+        "SA": "Sábado",
+        "SU": "Domingo"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total": {
+        "name": "Accesos"
+      },
+      "managed": {
+        "name": "Accesos administrados"
+      },
+      "pending": {
+        "name": "Operaciones de acceso pendientes"
+      }
+    }
+  },
+  "services": {
+    "list_accesses": {
+      "name": "Listar accesos",
+      "description": "Devuelve nombres, horarios e identificadores sin valores de PIN.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        }
+      }
+    },
+    "create_access": {
+      "name": "Crear acceso",
+      "description": "Crea un acceso y espera la confirmación de carga de Yale. El PIN de entrada puede aparecer en trazas de automatización.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "name": {
+          "name": "Nombre del invitado",
+          "description": "Nombre visible en la app Yale."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "De 4 a 8 dígitos; no aparece en respuestas ni estados."
+        },
+        "access_type": {
+          "name": "Tipo de acceso",
+          "description": "Permanente, temporal o recurrente semanal."
+        },
+        "starts_at": {
+          "name": "Inicio",
+          "description": "Obligatorio para accesos temporales; hora local de HA o fecha ISO con zona."
+        },
+        "ends_at": {
+          "name": "Fin",
+          "description": "Obligatorio para accesos temporales."
+        },
+        "weekdays": {
+          "name": "Días",
+          "description": "Obligatorios para accesos recurrentes."
+        },
+        "start_time": {
+          "name": "Inicio diario",
+          "description": "Hora local de la cerradura para accesos recurrentes."
+        },
+        "end_time": {
+          "name": "Fin diario",
+          "description": "Hora local de la cerradura; la franja no puede cruzar medianoche."
+        }
+      }
+    },
+    "update_access": {
+      "name": "Reemplazar acceso",
+      "description": "Reemplaza nombre, PIN y horario mediante eliminación y carga. Habrá una breve interrupción. El PIN puede aparecer en trazas de automatización.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID de acceso",
+          "description": "ID administrado devuelto por Listar accesos."
+        },
+        "name": {
+          "name": "Nombre del invitado",
+          "description": "Nombre de reemplazo."
+        },
+        "pin": {
+          "name": "PIN nuevo",
+          "description": "De 4 a 8 dígitos."
+        },
+        "access_type": {
+          "name": "Tipo de acceso",
+          "description": "Tipo de acceso de reemplazo."
+        },
+        "starts_at": {
+          "name": "Inicio",
+          "description": "Obligatorio para accesos temporales."
+        },
+        "ends_at": {
+          "name": "Fin",
+          "description": "Obligatorio para accesos temporales."
+        },
+        "weekdays": {
+          "name": "Días",
+          "description": "Obligatorios para accesos recurrentes."
+        },
+        "start_time": {
+          "name": "Inicio diario",
+          "description": "Hora local de la cerradura."
+        },
+        "end_time": {
+          "name": "Fin diario",
+          "description": "La franja no puede cruzar medianoche."
+        }
+      }
+    },
+    "delete_access": {
+      "name": "Eliminar acceso",
+      "description": "Elimina un acceso administrado y espera que Yale deje de reportarlo.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID de acceso",
+          "description": "ID administrado devuelto por Listar accesos."
+        }
+      }
+    },
+    "reconcile_access": {
+      "name": "Verificar acceso pendiente",
+      "description": "Verifica un acceso cargado usando su PIN y datos esperados, sin escribir en Yale. El PIN puede aparecer en trazas de automatización.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID de acceso",
+          "description": "ID administrado devuelto por Listar accesos."
+        },
+        "name": {
+          "name": "Nombre del invitado",
+          "description": "Nombre de reemplazo."
+        },
+        "pin": {
+          "name": "PIN esperado",
+          "description": "De 4 a 8 dígitos."
+        },
+        "access_type": {
+          "name": "Tipo de acceso",
+          "description": "Tipo de acceso de reemplazo."
+        },
+        "starts_at": {
+          "name": "Inicio",
+          "description": "Obligatorio para accesos temporales."
+        },
+        "ends_at": {
+          "name": "Fin",
+          "description": "Obligatorio para accesos temporales."
+        },
+        "weekdays": {
+          "name": "Días",
+          "description": "Obligatorios para accesos recurrentes."
+        },
+        "start_time": {
+          "name": "Inicio diario",
+          "description": "Hora local de la cerradura."
+        },
+        "end_time": {
+          "name": "Fin diario",
+          "description": "La franja no puede cruzar medianoche."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_device": {
+      "message": "Selecciona exactamente una cerradura Yale configurada."
+    },
+    "source_unavailable": {
+      "message": "La integración August existente debe estar configurada y activa."
+    },
+    "source_auth": {
+      "message": "Vuelve a autenticar la integración August de origen."
+    },
+    "access_denied": {
+      "message": "Se requiere acceso de propietario a la cerradura."
+    },
+    "unsupported_lock": {
+      "message": "La cerradura no admite códigos de acceso."
+    },
+    "unsupported_schedule": {
+      "message": "La cerradura no admite horarios."
+    },
+    "cannot_connect": {
+      "message": "No se pudo conectar con Yale; no se asume que la operación terminó."
+    },
+    "invalid_response": {
+      "message": "Yale devolvió una respuesta inesperada; no se asume finalización."
+    },
+    "journal_invalid": {
+      "message": "El registro de accesos es inválido. Restaura un respaldo de Home Assistant; no recrees accesos a ciegas."
+    },
+    "rate_limited": {
+      "message": "Yale está limitando las solicitudes. Inténtalo más tarde."
+    },
+    "invalid_pin": {
+      "message": "El PIN debe tener de 4 a 8 dígitos ASCII."
+    },
+    "invalid_name": {
+      "message": "Usa un nombre de 1 a 80 caracteres."
+    },
+    "invalid_schedule": {
+      "message": "Horario inválido. Revisa fechas, zona horaria, días y horas."
+    },
+    "duplicate_pin": {
+      "message": "Ese PIN ya está asignado en la cerradura."
+    },
+    "not_managed": {
+      "message": "No se pueden modificar accesos creados desde la app o desconocidos."
+    },
+    "operation_pending": {
+      "message": "La operación anterior no se ha resuelto. Consulta los accesos antes de repetirla."
+    },
+    "outcome_unknown": {
+      "message": "La finalización no está confirmada. Se conserva el registro; revisa los accesos antes de otro cambio."
+    },
+    "write_rejected": {
+      "message": "Yale rechazó el cambio. Revisa datos y capacidad de la cerradura."
+    },
+    "update_rolled_back": {
+      "message": "El reemplazo fue rechazado; se restauró el PIN anterior."
+    }
+  }
+}

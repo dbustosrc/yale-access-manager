@@ -1,0 +1,13 @@
+{
+  "domain": "yale_access_manager",
+  "name": "Yale Access Manager",
+  "version": "0.1.0",
+  "documentation": "https://github.com/dbustosrc/yale-access-manager",
+  "issue_tracker": "https://github.com/dbustosrc/yale-access-manager/issues",
+  "codeowners": ["@dbustosrc"],
+  "config_flow": true,
+  "dependencies": ["august"],
+  "requirements": [],
+  "integration_type": "device",
+  "iot_class": "cloud_polling"
+}

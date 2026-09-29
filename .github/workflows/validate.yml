@@ -1,0 +1,31 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+
+  native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test against Home Assistant 2026.9.4
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/workspace:ro" -w /workspace
+          -e PYTHONPATH=/workspace/custom_components
+          -e PYTHONDONTWRITEBYTECODE=1
+          --entrypoint /bin/sh
+          ghcr.io/home-assistant/home-assistant:2026.9.4
+          -c 'python3 -m pip install --quiet --no-cache-dir yalexs==9.2.13 && python3 -B -m unittest discover -s tests -v'

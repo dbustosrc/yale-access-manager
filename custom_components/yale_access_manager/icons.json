@@ -1,0 +1,8 @@
+{
+  "services": {
+    "list_accesses": {"service": "mdi:account-key"},
+    "create_access": {"service": "mdi:account-plus"},
+    "update_access": {"service": "mdi:account-edit"},
+    "delete_access": {"service": "mdi:account-remove"}
+  }
+}

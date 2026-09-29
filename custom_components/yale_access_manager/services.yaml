@@ -1,0 +1,153 @@
+list_accesses:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+
+create_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    name:
+      required: true
+      selector:
+        text:
+    pin:
+      required: true
+      selector:
+        text:
+          type: password
+    access_type:
+      required: true
+      default: temporary
+      selector:
+        select:
+          options: [always, temporary, recurring]
+          translation_key: access_type
+    starts_at:
+      selector:
+        datetime:
+    ends_at:
+      selector:
+        datetime:
+    weekdays:
+      selector:
+        select:
+          options: [MO, TU, WE, TH, FR, SA, SU]
+          multiple: true
+          translation_key: weekdays
+    start_time:
+      selector:
+        time:
+    end_time:
+      selector:
+        time:
+
+update_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+    name:
+      required: true
+      selector:
+        text:
+    pin:
+      required: true
+      selector:
+        text:
+          type: password
+    access_type:
+      required: true
+      default: temporary
+      selector:
+        select:
+          options: [always, temporary, recurring]
+          translation_key: access_type
+    starts_at:
+      selector:
+        datetime:
+    ends_at:
+      selector:
+        datetime:
+    weekdays:
+      selector:
+        select:
+          options: [MO, TU, WE, TH, FR, SA, SU]
+          multiple: true
+          translation_key: weekdays
+    start_time:
+      selector:
+        time:
+    end_time:
+      selector:
+        time:
+
+reconcile_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+    name:
+      required: true
+      selector:
+        text:
+    pin:
+      required: true
+      selector:
+        text:
+          type: password
+    access_type:
+      required: true
+      default: temporary
+      selector:
+        select:
+          options: [always, temporary, recurring]
+          translation_key: access_type
+    starts_at:
+      selector:
+        datetime:
+    ends_at:
+      selector:
+        datetime:
+    weekdays:
+      selector:
+        select:
+          options: [MO, TU, WE, TH, FR, SA, SU]
+          multiple: true
+          translation_key: weekdays
+    start_time:
+      selector:
+        time:
+    end_time:
+      selector:
+        time:
+
+delete_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:

@@ -1,0 +1,363 @@
+{
+  "title": "Yale Access Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a Yale lock",
+        "description": "Select an existing August account and its lock. No new credentials are stored. The account must be a lock owner.",
+        "data": {
+          "august_entry_id": "August account",
+          "device_id": "Yale lock"
+        }
+      }
+    },
+    "error": {
+      "unknown_device": "The lock does not belong to the selected August account.",
+      "source_unavailable": "Configure and load the August integration first.",
+      "source_auth": "Reauthenticate the existing August integration.",
+      "access_denied": "The August account must have owner access to this lock.",
+      "unsupported_lock": "This lock does not support entry codes.",
+      "cannot_connect": "Unable to connect to Yale. Try again later.",
+      "rate_limited": "Yale is limiting requests. Try again later.",
+      "invalid_response": "Yale returned an unexpected response. Try again later."
+    },
+    "abort": {
+      "already_configured": "This lock is already configured.",
+      "no_august": "Configure the official August integration before adding Yale Access Manager."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage lock access",
+        "menu_options": {
+          "list_accesses": "View accesses",
+          "create_access": "Create access",
+          "update_access": "Replace access",
+          "delete_access": "Delete access",
+          "reconcile_access": "Resolve pending operation"
+        }
+      },
+      "list_accesses": {
+        "title": "Accesses",
+        "description": "Name | access type | Yale state | operation | access ID\n\n{accesses}\n\nEntries marked read_only belong to the Yale app or another manager. Press Submit to return to the menu."
+      },
+      "update_access": {
+        "title": "Choose access to replace",
+        "description": "Only this integration's accesses can be changed. Replacement deletes the previous PIN before loading the new one; a short interruption is expected.",
+        "data": {
+          "access_id": "Access"
+        }
+      },
+      "delete_access": {
+        "title": "Delete managed access",
+        "description": "Submitting deletes the selected entry from the lock. App-created entries are protected.",
+        "data": {
+          "access_id": "Access"
+        }
+      },
+      "details": {
+        "title": "Access details",
+        "description": "Enter a new PIN of 4 to 8 digits. PINs are never saved in integration options or entity state.",
+        "data": {
+          "name": "Guest name",
+          "pin": "New PIN",
+          "access_type": "Access type"
+        }
+      },
+      "schedule": {
+        "title": "Access schedule",
+        "description": "Temporary dates use Home Assistant's timezone. Weekly times use the lock's timezone configured in the Yale app; overnight windows are not supported.",
+        "data": {
+          "starts_at": "Starts at",
+          "ends_at": "Ends at",
+          "weekdays": "Days of the week",
+          "start_time": "Daily start",
+          "end_time": "Daily end"
+        }
+      },
+      "reconcile_access": {
+        "title": "Verify a loaded access",
+        "description": "Enter the PIN, name and schedule that should be loaded. This only reads Yale; it never repeats a write.",
+        "data": {
+          "access_id": "Access"
+        }
+      }
+    },
+    "error": {
+      "invalid_pin": "The PIN must contain 4 to 8 ASCII digits.",
+      "invalid_name": "Enter a guest name of 1 to 80 characters.",
+      "invalid_schedule": "Check the access dates, weekdays and times. The end must be later than the start; temporary access must not already be expired.",
+      "unsupported_schedule": "This lock does not support access schedules.",
+      "duplicate_pin": "That PIN is already assigned to another entry on this lock.",
+      "operation_pending": "The previous operation is unresolved. View accesses and refresh later; do not repeat creation blindly.",
+      "outcome_unknown": "Yale has not confirmed completion. View accesses before making further changes.",
+      "write_rejected": "Yale rejected the change. Check the input and lock capacity.",
+      "update_rolled_back": "Yale rejected the replacement; the previous PIN was restored.",
+      "cannot_connect": "Unable to connect to Yale. Try again later.",
+      "source_auth": "Reauthenticate the existing August integration.",
+      "source_unavailable": "The source August integration is unavailable.",
+      "access_denied": "The August account must have owner access to this lock.",
+      "rate_limited": "Yale is limiting requests. Try again later.",
+      "not_managed": "This integration does not own that access.",
+      "invalid_response": "Yale returned an unexpected response. No completion is assumed."
+    },
+    "abort": {
+      "not_ready": "The integration must be loaded before managing access.",
+      "cannot_connect": "Unable to read accesses from Yale.",
+      "no_managed_accesses": "Create an access with this integration first."
+    }
+  },
+  "selector": {
+    "access_type": {
+      "options": {
+        "always": "Permanent",
+        "temporary": "Temporary",
+        "recurring": "Weekly recurring"
+      }
+    },
+    "weekdays": {
+      "options": {
+        "MO": "Monday",
+        "TU": "Tuesday",
+        "WE": "Wednesday",
+        "TH": "Thursday",
+        "FR": "Friday",
+        "SA": "Saturday",
+        "SU": "Sunday"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total": {
+        "name": "Access entries"
+      },
+      "managed": {
+        "name": "Managed accesses"
+      },
+      "pending": {
+        "name": "Pending access operations"
+      }
+    }
+  },
+  "services": {
+    "list_accesses": {
+      "name": "List accesses",
+      "description": "Return guest metadata and management IDs without PIN values.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        }
+      }
+    },
+    "create_access": {
+      "name": "Create access",
+      "description": "Create an entry and wait for Yale to confirm it is loaded. PIN inputs can appear in automation traces.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "name": {
+          "name": "Guest name",
+          "description": "The name shown in the Yale app."
+        },
+        "pin": {
+          "name": "PIN",
+          "description": "4 to 8 digits; not included in responses or entity state."
+        },
+        "access_type": {
+          "name": "Access type",
+          "description": "Permanent, temporary or weekly recurring."
+        },
+        "starts_at": {
+          "name": "Starts at",
+          "description": "Required for temporary access; local HA time or an ISO timestamp with offset."
+        },
+        "ends_at": {
+          "name": "Ends at",
+          "description": "Required for temporary access."
+        },
+        "weekdays": {
+          "name": "Weekdays",
+          "description": "Required for recurring access."
+        },
+        "start_time": {
+          "name": "Daily start",
+          "description": "Required for recurring access, in the lock's timezone."
+        },
+        "end_time": {
+          "name": "Daily end",
+          "description": "Required for recurring access; same-day windows only."
+        }
+      }
+    },
+    "update_access": {
+      "name": "Replace access",
+      "description": "Replace a managed entry's name, PIN and schedule using delete then load. There is a short access interruption. PIN inputs can appear in automation traces.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "A managed ID returned by List accesses."
+        },
+        "name": {
+          "name": "Guest name",
+          "description": "The replacement guest name."
+        },
+        "pin": {
+          "name": "New PIN",
+          "description": "4 to 8 digits."
+        },
+        "access_type": {
+          "name": "Access type",
+          "description": "The replacement access type."
+        },
+        "starts_at": {
+          "name": "Starts at",
+          "description": "Required for temporary access."
+        },
+        "ends_at": {
+          "name": "Ends at",
+          "description": "Required for temporary access."
+        },
+        "weekdays": {
+          "name": "Weekdays",
+          "description": "Required for recurring access."
+        },
+        "start_time": {
+          "name": "Daily start",
+          "description": "Required for recurring access, in the lock's timezone."
+        },
+        "end_time": {
+          "name": "Daily end",
+          "description": "Required for recurring access; same-day windows only."
+        }
+      }
+    },
+    "delete_access": {
+      "name": "Delete access",
+      "description": "Remove a managed entry and wait until Yale no longer reports it.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "A managed ID returned by List accesses."
+        }
+      }
+    },
+    "reconcile_access": {
+      "name": "Verify pending access",
+      "description": "Verify a loaded entry against its expected PIN and metadata without writing to Yale. PIN inputs can appear in automation traces.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "A managed ID returned by List accesses."
+        },
+        "name": {
+          "name": "Guest name",
+          "description": "The replacement guest name."
+        },
+        "pin": {
+          "name": "Expected PIN",
+          "description": "4 to 8 digits."
+        },
+        "access_type": {
+          "name": "Access type",
+          "description": "The replacement access type."
+        },
+        "starts_at": {
+          "name": "Starts at",
+          "description": "Required for temporary access."
+        },
+        "ends_at": {
+          "name": "Ends at",
+          "description": "Required for temporary access."
+        },
+        "weekdays": {
+          "name": "Weekdays",
+          "description": "Required for recurring access."
+        },
+        "start_time": {
+          "name": "Daily start",
+          "description": "Required for recurring access, in the lock's timezone."
+        },
+        "end_time": {
+          "name": "Daily end",
+          "description": "Required for recurring access; same-day windows only."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "unknown_device": {
+      "message": "Select exactly one configured Yale lock device."
+    },
+    "source_unavailable": {
+      "message": "The existing August integration must be configured and loaded."
+    },
+    "source_auth": {
+      "message": "Reauthenticate the source August integration."
+    },
+    "access_denied": {
+      "message": "Owner access to the Yale lock is required."
+    },
+    "unsupported_lock": {
+      "message": "This lock does not support entry codes."
+    },
+    "unsupported_schedule": {
+      "message": "This lock does not support schedules."
+    },
+    "cannot_connect": {
+      "message": "Unable to connect to Yale; no completion is assumed."
+    },
+    "invalid_response": {
+      "message": "Yale returned an unexpected response; no completion is assumed."
+    },
+    "journal_invalid": {
+      "message": "The access journal is invalid. Restore a Home Assistant backup; do not recreate access blindly."
+    },
+    "rate_limited": {
+      "message": "Yale is limiting requests. Try again later."
+    },
+    "invalid_pin": {
+      "message": "Use 4 to 8 ASCII digits for the PIN."
+    },
+    "invalid_name": {
+      "message": "Use a guest name of 1 to 80 characters."
+    },
+    "invalid_schedule": {
+      "message": "Invalid access schedule. Check date order, timezone, weekdays and times."
+    },
+    "duplicate_pin": {
+      "message": "That PIN is already assigned on the lock."
+    },
+    "not_managed": {
+      "message": "App-created or unknown accesses cannot be changed by this integration."
+    },
+    "operation_pending": {
+      "message": "The previous operation is unresolved. Inspect the access list before trying again."
+    },
+    "outcome_unknown": {
+      "message": "Completion is unconfirmed. The journal is retained; inspect accesses before another change."
+    },
+    "write_rejected": {
+      "message": "Yale rejected the change. Check the input and lock capacity."
+    },
+    "update_rolled_back": {
+      "message": "Replacement was rejected; the previous PIN was restored."
+    }
+  }
+}
