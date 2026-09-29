@@ -126,6 +126,12 @@ class YaleAPI:
 
     async def write(self, lock_id: str, command: dict) -> dict:
         result = await self.request("POST", f"/locks/{quote(lock_id, safe='')}/pins", {"commands": [command]})
+        if result.get("status") in ("failure", "conflict", "error"):
+            secrets = [command.get("pin", ""), *(value for key, value in self.oauth.token.items()
+                        if isinstance(value, str) and ("token" in key or "secret" in key))]
+            detail = "Yale response: " + redact_error(json.dumps(result), secrets)
+            _LOGGER.error("%s", detail)
+            raise AccessError("write_rejected", detail=detail)
         transaction = result.get("transactionID")
         if isinstance(transaction, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", transaction):
             _LOGGER.info("Yale %s request accepted; transactionID=%s", command.get("action"), transaction)

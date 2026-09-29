@@ -535,6 +535,18 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
 
 
 class TransportChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_failure_body_is_not_mistaken_for_accepted_write(self):
+        api = YaleAPI(None, SimpleNamespace(token={"access_token": "synthetic-secret-token"}), None, None)
+        api.request = AsyncMock(return_value={"status": "failure", "errorName": "ValidationError",
+                                             "message": "Deletion rejected for PIN 234567", "pin": "234567"})
+        with self.assertLogs("yale_access_manager.api", level="ERROR") as logs:
+            with self.assertRaises(AccessError) as result:
+                await api.write("lock", {"pin": "234567", "action": "delete"})
+        self.assertEqual(result.exception.code, "write_rejected")
+        self.assertIn("Deletion rejected", result.exception.detail)
+        self.assertNotIn("234567", result.exception.detail + str(logs.output))
+        self.assertEqual(api.request.await_count, 1)
+
     async def test_http_error_details_and_logs_redact_secrets_without_retry(self):
         class OAuth:
             token = {"access_token": "synthetic-secret-token", "refresh_token": "synthetic-refresh"}

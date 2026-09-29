@@ -6,6 +6,7 @@
 - Remove a pending journal entry only after Yale accepts its deletion request and a fresh read confirms absence; preserve it on rejection or uncertainty.
 - Show the pending access ID in blocked-operation errors and log confirmation timeouts with the last observed Yale state.
 - Log accepted write transaction IDs without logging PINs or request bodies.
+- Preserve failure/conflict response bodies even when the HTTP request itself succeeds; never treat them as an accepted cancellation.
 
 ## 0.2.3
 
