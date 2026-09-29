@@ -212,3 +212,31 @@ issue_access:
         entity:
           filter:
             domain: person
+
+begin_visit:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    person_entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            domain: person
+
+end_visit:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    person_entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            domain: person

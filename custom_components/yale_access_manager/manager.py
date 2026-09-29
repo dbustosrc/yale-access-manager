@@ -53,7 +53,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
             for key, value in self.accesses.items():
                 if (not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key) or not isinstance(value, dict)
                         or not {"partner_id", "metadata", "operation"} <= set(value)
-                        or set(value) - {"partner_id", "metadata", "operation", "user_id", "person_unique_id", "notification_entry_id", "lease"}
+                        or set(value) - {"partner_id", "metadata", "operation", "user_id", "person_unique_id", "notification_entry_id", "lease", "visit"}
                         or value.get("partner_id") != f"yam-{key}"
                         or not isinstance(value.get("metadata"), dict)
                         or set(value["metadata"]) - {"firstName", "lastName", "accessType", "accessTimes", "accessRecurrence"}
@@ -73,6 +73,16 @@ class AccessManager(DataUpdateCoordinator[dict]):
                         if not all(datetime.fromisoformat(lease[field]).tzinfo for field in ("started_at", "expires_at")):
                             raise ValueError
                     except (ValueError, TypeError, KeyError):
+                        raise AccessError("journal_invalid") from None
+                if value.get("visit") is not None:
+                    visit = value["visit"]
+                    if (not isinstance(visit, dict) or set(visit) != {"open", "block_until"}
+                            or type(visit["open"]) is not bool):
+                        raise AccessError("journal_invalid")
+                    try:
+                        if not datetime.fromisoformat(visit["block_until"]).tzinfo:
+                            raise ValueError
+                    except (ValueError, TypeError):
                         raise AccessError("journal_invalid") from None
         locks = await self.api.locks()
         if self.lock_id not in locks or locks[self.lock_id].get("UserType") != "superuser":
@@ -289,6 +299,10 @@ class AccessManager(DataUpdateCoordinator[dict]):
                 raise AccessError("ambiguous_person")
             if record.get("user_id", user_id) != user_id:
                 raise AccessError("identity_changed")
+            if record.get("lease"):
+                raise AccessError("operation_pending")
+            if record.get("person_unique_id") != person.unique_id:
+                record.pop("visit", None)
             record.update(user_id=user_id, person_unique_id=person.unique_id, notification_entry_id=phone.entry_id)
             await self.save()
 
@@ -304,6 +318,40 @@ class AccessManager(DataUpdateCoordinator[dict]):
         if not self.hass.services.has_service("notify", service):
             raise AccessError("invalid_person")
         return service
+
+    def bound_guest(self, person_entity_id: str) -> str:
+        keys = [key for key in self.accesses if self.person_entity(key) == person_entity_id]
+        if len(keys) != 1:
+            raise AccessError("ambiguous_person")
+        return keys[0]
+
+    async def begin_visit(self, person_entity_id: str) -> dict:
+        """Reserve one question per visit without creating Home Assistant helpers."""
+        async with self.operation_lock:
+            key = self.bound_guest(person_entity_id)
+            service = self.notification_service(key)
+            record = self.accesses[key]
+            visit = record.get("visit")
+            now = datetime.now(timezone.utc)
+            if (visit and (visit["open"] or now < datetime.fromisoformat(visit["block_until"]))) or record.get("lease"):
+                return {"allowed": False}
+            self.ensure_idle()
+            pin = self.owned(await self.raw(), key)
+            if pin is None or pin.get("state") != "disabled":
+                raise AccessError("operation_pending")
+            if record.get("user_id") != pin.get("userID"):
+                raise AccessError("identity_changed")
+            record["visit"] = {"open": True, "block_until": (now + timedelta(minutes=30)).isoformat()}
+            await self.save()
+            return {"allowed": True, "notify_service": f"notify.{service}"}
+
+    async def end_visit(self, person_entity_id: str) -> None:
+        async with self.operation_lock:
+            key = self.bound_guest(person_entity_id)
+            visit = self.accesses[key].get("visit")
+            if visit and visit["open"]:
+                visit["open"] = False
+                await self.save()
 
     async def set_enabled(self, access_id: str, enabled: bool) -> None:
         async with self.operation_lock:
@@ -353,10 +401,7 @@ class AccessManager(DataUpdateCoordinator[dict]):
 
     async def issue_access(self, person_entity_id: str) -> dict:
         async with self.operation_lock:
-            keys = [key for key in self.accesses if self.person_entity(key) == person_entity_id]
-            if len(keys) != 1:
-                raise AccessError("ambiguous_person")
-            key = keys[0]
+            key = self.bound_guest(person_entity_id)
             service = self.notification_service(key)
             record = self.accesses[key]
             if record.get("lease"):

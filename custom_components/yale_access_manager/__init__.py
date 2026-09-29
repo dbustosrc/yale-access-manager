@@ -58,12 +58,16 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
             result = await manager.issue_access(call.data["person_entity_id"])
             if call.return_response:
                 return result
+        elif action == "begin_visit":
+            return await manager.begin_visit(call.data["person_entity_id"])
+        elif action == "end_visit":
+            await manager.end_visit(call.data["person_entity_id"])
         elif action == "delete_access":
             await manager.delete(call.data["access_id"])
     except AccessError as exc:
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key=exc.code) from None
     finally:
-        if action != "list_accesses":
+        if action not in ("list_accesses", "begin_visit", "end_visit"):
             await manager.async_request_refresh()
 
 
@@ -79,9 +83,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         "bind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,
                         vol.Required("person_entity_id"): cv.entity_id, vol.Required("notification_entry_id"): cv.string},
         "issue_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
+        "begin_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
+        "end_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
     }
     for action, schema in schemas.items():
-        response = (SupportsResponse.ONLY if action == "list_accesses" else
+        response = (SupportsResponse.ONLY if action in ("list_accesses", "begin_visit") else
                     SupportsResponse.OPTIONAL if action in ("create_access", "issue_access") else SupportsResponse.NONE)
         service.async_register_admin_service(hass, DOMAIN, action, partial(handle_action, hass, action),
                                              schema=vol.Schema(schema), supports_response=response)

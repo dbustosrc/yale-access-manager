@@ -420,6 +420,22 @@
           "description": "Persona vinculada mediante su identificador estable."
         }
       }
+    },
+    "begin_visit": {
+      "name": "Iniciar visita del invitado",
+      "description": "Reserva una pregunta por visita y devuelve el servicio de notificación del teléfono Companion vinculado. Bloquea nuevas preguntas durante 30 minutos.",
+      "fields": {
+        "device_id": {"name": "Cerradura", "description": "La cerradura Yale configurada."},
+        "person_entity_id": {"name": "Persona", "description": "Persona vinculada a un invitado gestionado."}
+      }
+    },
+    "end_visit": {
+      "name": "Finalizar visita del invitado",
+      "description": "Restablece la visita tras una salida confirmada; conserva la espera de 30 minutos.",
+      "fields": {
+        "device_id": {"name": "Cerradura", "description": "La cerradura Yale configurada."},
+        "person_entity_id": {"name": "Persona", "description": "El invitado vinculado que salió."}
+      }
     }
   },
   "exceptions": {

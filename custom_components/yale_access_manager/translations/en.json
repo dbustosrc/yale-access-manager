@@ -420,6 +420,22 @@
           "description": "Person linked by its stable identifier."
         }
       }
+    },
+    "begin_visit": {
+      "name": "Begin guest visit",
+      "description": "Reserve one question for a linked guest's visit and return their verified Companion notification service. A new question is blocked for 30 minutes.",
+      "fields": {
+        "device_id": {"name": "Lock", "description": "The configured Yale lock."},
+        "person_entity_id": {"name": "Person", "description": "The person linked to one managed guest."}
+      }
+    },
+    "end_visit": {
+      "name": "End guest visit",
+      "description": "Clear the visit after confirmed departure. The 30-minute question cooldown remains in effect.",
+      "fields": {
+        "device_id": {"name": "Lock", "description": "The configured Yale lock."},
+        "person_entity_id": {"name": "Person", "description": "The linked guest who departed."}
+      }
     }
   },
   "exceptions": {

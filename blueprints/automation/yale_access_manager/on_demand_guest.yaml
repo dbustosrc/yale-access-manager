@@ -1,0 +1,197 @@
+blueprint:
+  name: Yale on-demand guest code
+  description: >-
+    Ask one linked guest per visit when a fresh front-door face detection and
+    independent presence checks agree. A confirmed Yes issues a ten-minute PIN.
+    Create one automation from this blueprint for each guest. The managed Yale
+    access must already be linked and disabled. Keep the automation disabled
+    until physical keypad behavior has been verified.
+  domain: automation
+  author: dbustosrc
+  homeassistant:
+    min_version: 2026.9.4
+  input:
+    yale_device:
+      name: Yale Access Manager lock
+      selector:
+        device:
+          integration: yale_access_manager
+    guest_person:
+      name: Linked Home Assistant person
+      selector:
+        entity:
+          filter:
+            domain: person
+    face_identity:
+      name: Frigate identity ID
+      description: Use the canonical Presence Engine identity, never the Yale guest name.
+      selector:
+        text:
+    camera_origin:
+      name: Front-door camera origin ID
+      selector:
+        text:
+    detection_area:
+      name: Entrance area
+      selector:
+        text:
+    phone_tracker:
+      name: Guest phone proximity tracker
+      selector:
+        entity:
+          filter:
+            domain: device_tracker
+    lock_entity:
+      name: Bluetooth lock entity
+      selector:
+        entity:
+          filter:
+            domain: lock
+    door_contact:
+      name: Door contact sensor
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+    camera_occupancy:
+      name: Front-door person occupancy sensor
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+
+variables:
+  face_identity: !input face_identity
+  camera_origin: !input camera_origin
+  detection_area: !input detection_area
+
+triggers:
+  - trigger: state
+    entity_id: event.presence_engine_detection
+    id: arrival
+  - trigger: state
+    entity_id: !input guest_person
+    to: not_home
+    for: "00:05:00"
+    id: departure
+  - trigger: state
+    entity_id: !input phone_tracker
+    to: not_home
+    for: "00:05:00"
+    id: departure
+  - trigger: time_pattern
+    minutes: "/5"
+    id: departure
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'arrival' }}"
+          - condition: state
+            entity_id: !input phone_tracker
+            state: home
+          - condition: state
+            entity_id: !input door_contact
+            state: "off"
+          - condition: state
+            entity_id: !input lock_entity
+            state: locked
+          - condition: template
+            value_template: >-
+              {% set detection = trigger.to_state.attributes %}
+              {% set location = detection.location | default(none, true) %}
+              {% set image = detection.image | default(none, true) %}
+              {{ detection.event_type | default('', true) in ['started', 'revised']
+                 and detection.kind | default('', true) == 'person'
+                 and detection.identity | default('', true) == face_identity
+                 and detection.identity_method | default('', true) == 'frigate_face_recognition'
+                 and detection.identity_score | float(0) >= 0.9
+                 and image is mapping and image.origin_id | default('', true) == camera_origin
+                 and location is mapping and location.level | default('', true) == 'area'
+                 and location.area | default('', true) == detection_area
+                 and 0 <= as_timestamp(now()) - as_timestamp(detection.recognized_at | default('', true), 0) <= 30
+                 and 0 <= as_timestamp(now()) - as_timestamp(detection.spatial_observed_at | default('', true), 0) <= 30 }}
+        sequence:
+          - action: yale_access_manager.begin_visit
+            data:
+              device_id: !input yale_device
+              person_entity_id: !input guest_person
+            response_variable: visit
+          - condition: template
+            value_template: "{{ visit.allowed }}"
+          - variables:
+              action_yes: "{{ 'YALE_YES_' ~ context.id }}"
+              action_no: "{{ 'YALE_NO_' ~ context.id }}"
+              question_tag: "{{ 'yale-question-' ~ context.id }}"
+          - action: "{{ visit.notify_service }}"
+            data:
+              title: Acceso a la puerta
+              message: ¿Necesitas un código para entrar?
+              data:
+                tag: "{{ question_tag }}"
+                timeout: 120
+                actions:
+                  - action: "{{ action_yes }}"
+                    title: Sí, necesito código
+                    authenticationRequired: true
+                  - action: "{{ action_no }}"
+                    title: No, gracias
+                    authenticationRequired: true
+          - wait_for_trigger:
+              - trigger: event
+                event_type: mobile_app_notification_action
+                event_data:
+                  action: "{{ action_yes }}"
+              - trigger: event
+                event_type: mobile_app_notification_action
+                event_data:
+                  action: "{{ action_no }}"
+            timeout: "00:02:00"
+            continue_on_timeout: true
+          - action: "{{ visit.notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ question_tag }}"
+          - if:
+              - condition: template
+                value_template: "{{ wait.completed and wait.trigger.event.data.action == action_yes }}"
+              - condition: state
+                entity_id: !input phone_tracker
+                state: home
+              - condition: state
+                entity_id: !input door_contact
+                state: "off"
+              - condition: state
+                entity_id: !input lock_entity
+                state: locked
+              - condition: state
+                entity_id: !input camera_occupancy
+                state: "on"
+              - condition: template
+                value_template: >-
+                  {{ 0 <= as_timestamp(now()) - as_timestamp(trigger.to_state.attributes.recognized_at | default('', true), 0) <= 120 }}
+            then:
+              - action: yale_access_manager.issue_access
+                data:
+                  device_id: !input yale_device
+                  person_entity_id: !input guest_person
+      - conditions:
+          - condition: state
+            entity_id: !input guest_person
+            state: not_home
+            for: "00:05:00"
+          - condition: state
+            entity_id: !input phone_tracker
+            state: not_home
+            for: "00:05:00"
+        sequence:
+          - action: yale_access_manager.end_visit
+            data:
+              device_id: !input yale_device
+              person_entity_id: !input guest_person
+
+mode: parallel
+max: 3
+max_exceeded: silent

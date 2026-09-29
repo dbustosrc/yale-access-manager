@@ -71,6 +71,8 @@ automation, and an explicit configured lock `device_id`.
 | `yale_access_manager.enable_access` | `device_id`, managed `access_id` | Confirms an unexpired PIN is loaded |
 | `yale_access_manager.bind_person` | `device_id`, managed `access_id`, `person_entity_id`, `notification_entry_id` | Links stable identifiers |
 | `yale_access_manager.issue_access` | `device_id`, linked `person_entity_id` | Renews a ten-minute temporary PIN and sends it to the linked Companion phone; returns no PIN |
+| `yale_access_manager.begin_visit` | `device_id`, linked `person_entity_id` | Reserves one question per visit and returns the verified Companion notify service, or `allowed: false` |
+| `yale_access_manager.end_visit` | `device_id`, linked `person_entity_id` | Clears the visit after departure; preserves the 30-minute cooldown |
 
 For `temporary`, provide `starts_at` and `ends_at`. For `recurring`, provide
 `weekdays` (MO, TU, WE, TH, FR, SA, SU), `start_time` and `end_time`.
@@ -104,10 +106,24 @@ can lag, so this is **best-effort single use**, not a hardware-enforced one-time
 credential.
 
 The integration itself does not decide when a visitor may request access.
-Use a Home Assistant automation with independent camera, device presence and
-door checks. Keep any such automation disabled until the guest linkage,
-notification delivery and physical keypad behavior have been verified. Existing
-app-created permanent codes must be retired separately through Yale.
+The reusable blueprint at
+[`blueprints/automation/yale_access_manager/on_demand_guest.yaml`](blueprints/automation/yale_access_manager/on_demand_guest.yaml)
+combines a fresh recognized face at the entrance with phone proximity, Bluetooth
+lock state and door contact. It asks the linked Companion phone once per visit,
+waits two minutes for a Yes/No answer, and rechecks presence and door state before
+issuing. It keeps a 30-minute question cooldown and the visit state in the
+private access journal; no input booleans or timers are needed. Both the guest
+and phone must be away for five minutes to end a visit. A periodic check
+recovers departure after Home Assistant restarts.
+
+Install the blueprint in Home Assistant's `blueprints/automation` directory,
+then create **one UI automation from it per guest**. Select the managed lock,
+linked person, canonical Presence Engine face ID, entrance camera and area,
+phone proximity tracker, Bluetooth lock, door contact and camera occupancy.
+Each instance is editable through Home Assistant's automation editor. Keep it
+disabled until the guest linkage, notification delivery and physical keypad
+behavior have been verified. Existing app-created permanent codes must be
+retired separately through Yale.
 
 ## Privacy and persistence
 

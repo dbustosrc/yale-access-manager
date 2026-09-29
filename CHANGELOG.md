@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Add a reusable Home Assistant blueprint for on-demand guest access with explicit face, phone, lock and door checks.
+- Keep per-guest visit and 30-minute question cooldown state in the private access journal, avoiding separate helpers for each guest.
+- Route the question to the Companion phone already linked to the managed guest.
+- Require a disabled managed access before asking; keep code issuance conditional on a fresh detection and confirmed notification response.
+
 ## 0.2.0
 
 - Link each managed guest to a Home Assistant person and a Companion phone using stable account and Yale user identifiers.
