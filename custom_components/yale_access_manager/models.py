@@ -90,8 +90,28 @@ def saved(command_data: dict) -> dict:
             and (key != "lastName" or command_data[key])}
 
 
-def matches(pin: dict, desired: dict) -> bool:
-    return (pin.get("state") == "loaded" and pin.get("pin") == desired["pin"]
+def matches(pin: dict, desired: dict, *, state: str = "loaded") -> bool:
+    return (pin.get("state") == state and pin.get("pin") == desired["pin"]
             and (pin.get("lastName") or "") == (desired.get("lastName") or "")
             and all((pin.get(key) or "") == value if key in ("firstName", "lastName") else pin.get(key) == value
                     for key, value in saved(desired).items()))
+
+
+def form_values(data: dict) -> dict:
+    """Prefill native forms from allowlisted metadata, never from a PIN."""
+    result = {"name": metadata(data)["name"], "access_type": data.get("accessType", "temporary")}
+    fields = dict(part.split("=", 1) for part in data.get("accessTimes", "").split(";") if "=" in part)
+    if result["access_type"] == "temporary":
+        result.update(starts_at=fields.get("DTSTART", ""), ends_at=fields.get("DTEND", ""))
+    elif result["access_type"] == "recurring":
+        for field, source in (("start_time", "STARTSEC"), ("end_time", "ENDSEC")):
+            try:
+                seconds = int(fields[source])
+                if not 0 <= seconds < 86400:
+                    raise ValueError
+                result[field] = f"{seconds // 3600:02}:{seconds % 3600 // 60:02}:00"
+            except (KeyError, ValueError):
+                pass
+        recurrence = dict(part.split("=", 1) for part in data.get("accessRecurrence", "").split(";") if "=" in part)
+        result["weekdays"] = [day for day in recurrence.get("BYDAY", "").split(",") if day in DAYS]
+    return result

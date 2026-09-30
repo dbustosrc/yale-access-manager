@@ -14,7 +14,7 @@ from .api import create_api
 from .const import ACCESS_TYPES, CONF_DEVICE, CONF_LOCK, CONF_SOURCE, DOMAIN, AccessError
 from .manager import AccessManager
 
-PLATFORMS = [Platform.SENSOR, Platform.EVENT]
+PLATFORMS = [Platform.SENSOR, Platform.EVENT, Platform.BINARY_SENSOR, Platform.SWITCH]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 ACCESS_FIELDS = {
     vol.Required("name"): cv.string,
@@ -51,15 +51,19 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
         elif action == "reconcile_access":
             await manager.reconcile(call.data["access_id"], dict(call.data))
         elif action == "bind_person":
-            await manager.bind_person(call.data["access_id"], call.data["person_entity_id"], call.data.get("notification_entry_id"))
+            await manager.bind_person(call.data["access_id"], call.data["person_entity_id"], call.data.get("notification_entry_id"), clear_notification=call.data.get("clear_notification", False))
+        elif action == "unbind_person":
+            await manager.unbind_person(call.data["access_id"])
         elif action in ("disable_access", "enable_access"):
             await manager.set_enabled(call.data["access_id"], action == "enable_access")
         elif action == "issue_access":
-            result = await manager.issue_access(call.data["person_entity_id"])
+            result = await manager.issue_access(call.data["person_entity_id"], validity_minutes=call.data.get("validity_minutes", 10), language=call.data.get("language"))
             if call.return_response:
                 return result
         elif action == "begin_visit":
-            return await manager.begin_visit(call.data["person_entity_id"])
+            return await manager.begin_visit(call.data["person_entity_id"], cooldown_minutes=call.data.get("cooldown_minutes", 30))
+        elif action == "confirm_delivery":
+            return await manager.confirm_delivery(call.data["access_id"], call.data["receipt_action"])
         elif action == "end_visit":
             await manager.end_visit(call.data["person_entity_id"])
         elif action == "delete_access":
@@ -67,12 +71,11 @@ async def handle_action(hass: HomeAssistant, action: str, call: ServiceCall):
         elif action == "cancel_pending_access":
             await manager.delete(call.data["access_id"], cancellation_pin=call.data["pin"])
     except AccessError as exc:
+        if action not in ("list_accesses", "begin_visit", "end_visit"):
+            await manager.async_request_refresh()
         if exc.detail:
             raise HomeAssistantError(exc.detail) from None
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key=exc.code) from None
-    finally:
-        if action not in ("list_accesses", "begin_visit", "end_visit"):
-            await manager.async_request_refresh()
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -87,13 +90,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         "disable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "enable_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
         "bind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string,
-                        vol.Required("person_entity_id"): cv.entity_id, vol.Optional("notification_entry_id"): cv.string},
-        "issue_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
-        "begin_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
+                        vol.Required("person_entity_id"): cv.entity_id, vol.Optional("notification_entry_id"): cv.string,
+                        vol.Optional("clear_notification"): cv.boolean},
+        "unbind_person": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string},
+        "confirm_delivery": {vol.Required(CONF_DEVICE): cv.string, vol.Required("access_id"): cv.string, vol.Required("receipt_action"): cv.string},
+        "issue_access": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id,
+                         vol.Optional("validity_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=30)), vol.Optional("language"): vol.In(("en", "es"))},
+        "begin_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id,
+                        vol.Optional("cooldown_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=120))},
         "end_visit": {vol.Required(CONF_DEVICE): cv.string, vol.Required("person_entity_id"): cv.entity_id},
     }
     for action, schema in schemas.items():
-        response = (SupportsResponse.ONLY if action in ("list_accesses", "begin_visit") else
+        response = (SupportsResponse.ONLY if action in ("list_accesses", "begin_visit", "confirm_delivery") else
                     SupportsResponse.OPTIONAL if action in ("create_access", "issue_access") else SupportsResponse.NONE)
         service.async_register_admin_service(hass, DOMAIN, action, partial(handle_action, hass, action),
                                              schema=vol.Schema(schema), supports_response=response)
@@ -129,6 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id,
                                           identifiers={("august", entry.data[CONF_LOCK])})
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    manager.start()
     return True
 
 

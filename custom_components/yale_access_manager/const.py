@@ -7,7 +7,7 @@ CONF_DEVICE = "device_id"
 CONF_LOCK = "lock_id"
 ACCESS_TYPES = ("always", "temporary", "recurring")
 DAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
-EVENT_TYPES = ("created", "updated", "disabled", "enabled", "keypad_unlock", "issued", "expired", "deleted")
+EVENT_TYPES = ("created", "updated", "disabled", "enabled", "keypad_unlock", "issued", "consumed", "expired", "deleted", "delivery_confirmed")
 
 
 class AccessError(Exception):

@@ -214,6 +214,37 @@ bind_person:
       selector:
         config_entry:
           integration: mobile_app
+    clear_notification:
+      selector:
+        boolean:
+
+unbind_person:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+
+confirm_delivery:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: yale_access_manager
+    access_id:
+      required: true
+      selector:
+        text:
+    receipt_action:
+      required: true
+      selector:
+        text:
 
 issue_access:
   fields:
@@ -228,6 +259,18 @@ issue_access:
         entity:
           filter:
             domain: person
+    validity_minutes:
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 30
+          mode: box
+          unit_of_measurement: min
+    language:
+      selector:
+        select:
+          options: [en, es]
 
 begin_visit:
   fields:
@@ -242,6 +285,14 @@ begin_visit:
         entity:
           filter:
             domain: person
+    cooldown_minutes:
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          mode: box
+          unit_of_measurement: min
 
 end_visit:
   fields:

@@ -2,7 +2,7 @@ blueprint:
   name: Yale on-demand guest code
   description: >-
     Ask one linked guest per visit when a fresh front-door face detection and
-    independent presence checks agree. A confirmed Yes issues a ten-minute PIN.
+    independent presence checks agree. A confirmed Yes issues a short-lived PIN.
     Create one automation from this blueprint for each guest. The managed Yale
     access must already be linked and disabled. Keep the automation disabled
     until physical keypad behavior has been verified.
@@ -11,6 +11,36 @@ blueprint:
   homeassistant:
     min_version: 2026.9.4
   input:
+    detection_entity:
+      name: Presence Engine detection event
+      description: Requires the Presence Engine face and spatial detection attributes.
+      default: event.presence_engine_detection
+      selector:
+        entity:
+          filter:
+            domain: event
+    validity_minutes:
+      name: Code validity (minutes)
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 30
+          mode: box
+    cooldown_minutes:
+      name: Minimum time between questions (minutes)
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          mode: box
+    language:
+      name: Notification language
+      default: es
+      selector:
+        select:
+          options: [es, en]
     yale_device:
       name: Yale Access Manager lock
       selector:
@@ -64,10 +94,11 @@ variables:
   face_identity: !input face_identity
   camera_origin: !input camera_origin
   detection_area: !input detection_area
+  language: !input language
 
 triggers:
   - trigger: state
-    entity_id: event.presence_engine_detection
+    entity_id: !input detection_entity
     id: arrival
   - trigger: state
     entity_id: !input guest_person
@@ -117,6 +148,7 @@ actions:
             data:
               device_id: !input yale_device
               person_entity_id: !input guest_person
+              cooldown_minutes: !input cooldown_minutes
             response_variable: visit
           - condition: template
             value_template: "{{ visit.allowed }}"
@@ -125,18 +157,19 @@ actions:
               action_no: "{{ 'YALE_NO_' ~ context.id }}"
               question_tag: "{{ 'yale-question-' ~ context.id }}"
           - action: "{{ visit.notify_service }}"
+            continue_on_error: true
             data:
-              title: Acceso a la puerta
-              message: ¿Necesitas un código para entrar?
+              title: "{{ 'Acceso a la puerta' if language == 'es' else 'Door access' }}"
+              message: "{{ '¿Necesitas un código para entrar?' if language == 'es' else 'Do you need an entry code?' }}"
               data:
                 tag: "{{ question_tag }}"
                 timeout: 120
                 actions:
                   - action: "{{ action_yes }}"
-                    title: Sí, necesito código
+                    title: "{{ 'Sí, necesito código' if language == 'es' else 'Yes, I need a code' }}"
                     authenticationRequired: true
                   - action: "{{ action_no }}"
-                    title: No, gracias
+                    title: "{{ 'No, gracias' if language == 'es' else 'No, thank you' }}"
                     authenticationRequired: true
           - wait_for_trigger:
               - trigger: event
@@ -150,10 +183,19 @@ actions:
             timeout: "00:02:00"
             continue_on_timeout: true
           - action: "{{ visit.notify_service }}"
+            continue_on_error: true
             data:
               message: clear_notification
               data:
                 tag: "{{ question_tag }}"
+          - if:
+              - condition: template
+                value_template: "{{ not wait.completed }}"
+            then:
+              - action: yale_access_manager.end_visit
+                data:
+                  device_id: !input yale_device
+                  person_entity_id: !input guest_person
           - if:
               - condition: template
                 value_template: "{{ wait.completed and wait.trigger.event.data.action == action_yes }}"
@@ -177,6 +219,26 @@ actions:
                 data:
                   device_id: !input yale_device
                   person_entity_id: !input guest_person
+                  validity_minutes: !input validity_minutes
+                  language: !input language
+                response_variable: issued_access
+              - wait_for_trigger:
+                  - trigger: event
+                    event_type: mobile_app_notification_action
+                    event_data:
+                      action: "{{ issued_access.receipt_action }}"
+                timeout: "00:02:00"
+                continue_on_timeout: true
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.completed }}"
+                then:
+                  - action: yale_access_manager.confirm_delivery
+                    data:
+                      device_id: !input yale_device
+                      access_id: "{{ issued_access.access_id }}"
+                      receipt_action: "{{ issued_access.receipt_action }}"
+                    response_variable: code_receipt
       - conditions:
           - condition: state
             entity_id: !input guest_person

@@ -8,6 +8,7 @@ from homeassistant.helpers import device_registry as dr, selector
 
 from .api import create_api
 from .const import ACCESS_TYPES, CONF_DEVICE, CONF_LOCK, CONF_SOURCE, DAYS, DOMAIN, AccessError
+from .models import form_values
 
 
 class YaleAccessManagerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -75,7 +76,7 @@ class AccessOptionsFlow(OptionsFlow):
             return self.async_abort(reason="not_ready")
         return self.async_show_menu(step_id="init", menu_options=["list_accesses", "create_access", "update_access", "bind_person",
                                                                  "disable_access", "enable_access", "reconcile_access", "delete_access",
-                                                                 "cancel_pending_access"])
+                                                                 "cancel_pending_access", "unbind_person", "end_visit"])
 
     async def async_step_list_accesses(self, user_input=None):
         if user_input is not None:
@@ -104,6 +105,7 @@ class AccessOptionsFlow(OptionsFlow):
             self._access_id = user_input["access_id"]
             if step_id in ("update_access", "reconcile_access"):
                 self._mode = step_id
+                self._draft = form_values(self.manager.accesses[self._access_id]["metadata"])
                 return await self._details()
             if step_id == "bind_person":
                 return await self.async_step_person()
@@ -112,6 +114,13 @@ class AccessOptionsFlow(OptionsFlow):
             try:
                 if step_id == "delete_access":
                     await self.manager.delete(self._access_id)
+                elif step_id == "unbind_person":
+                    await self.manager.unbind_person(self._access_id)
+                elif step_id == "end_visit":
+                    person = self.manager.person_entity(self._access_id)
+                    if person is None:
+                        raise AccessError("invalid_person")
+                    await self.manager.end_visit(person)
                 else:
                     await self.manager.set_enabled(self._access_id, step_id == "enable_access")
                 return self.async_create_entry(title="", data={})
@@ -124,11 +133,34 @@ class AccessOptionsFlow(OptionsFlow):
             if exc.detail:
                 return self.async_abort(reason="yale_error", description_placeholders={"error": exc.detail})
             return self.async_abort(reason="cannot_connect")
-        choices = [{"value": item["access_id"], "label": f"{item['name']} · {item['state']} · {item['operation']}"}
-                   for item in listing["accesses"] if (item["managed"] or step_id == "bind_person")
-                   and (step_id != "cancel_pending_access" or item["operation"] != "ready")]
+        items = listing["accesses"]
+        links = {**self.manager.accesses, **self.manager.external_links}
+        if step_id == "unbind_person":
+            present = {item["access_id"] for item in items}
+            items += [{"access_id": key, "name": key, "state": "not_found", "operation": "read_only", "managed": False}
+                      for key in self.manager.external_links if key not in present]
+        choices = []
+        for item in items:
+            record = links.get(item["access_id"], {})
+            if not item["managed"] and step_id not in ("bind_person", "unbind_person"):
+                continue
+            if step_id == "cancel_pending_access" and (item["operation"] == "ready" or record.get("lease")):
+                continue
+            if step_id == "enable_access" and (item["state"] != "disabled" or item["operation"] != "ready" or record.get("lease")):
+                continue
+            if step_id == "disable_access" and item["state"] != "loaded":
+                continue
+            if step_id == "update_access" and (item["state"] not in ("loaded", "disabled") or item["operation"] != "ready" or record.get("lease")):
+                continue
+            if step_id == "reconcile_access" and item["operation"] == "ready":
+                continue
+            if step_id == "unbind_person" and (not record.get("person_unique_id") or record.get("lease")):
+                continue
+            if step_id == "end_visit" and (not record.get("visit", {}).get("open") or record.get("lease")):
+                continue
+            choices.append({"value": item["access_id"], "label": f"{item['name']} · {item['state']} · {item['operation']}"})
         if not choices:
-            return self.async_abort(reason="no_accesses" if step_id == "bind_person" else "no_managed_accesses")
+            return self.async_abort(reason="no_eligible_accesses")
         return self.async_show_form(step_id=step_id, errors=errors, description_placeholders=placeholders, data_schema=vol.Schema({
             vol.Required("access_id"): selector.SelectSelector(selector.SelectSelectorConfig(options=choices))}))
 
@@ -166,12 +198,18 @@ class AccessOptionsFlow(OptionsFlow):
     async def async_step_bind_person(self, user_input=None):
         return await self._select("bind_person", user_input)
 
+    async def async_step_unbind_person(self, user_input=None):
+        return await self._select("unbind_person", user_input)
+
+    async def async_step_end_visit(self, user_input=None):
+        return await self._select("end_visit", user_input)
+
     async def async_step_person(self, user_input=None):
         errors = {}
         placeholders = {}
         if user_input is not None:
             try:
-                await self.manager.bind_person(self._access_id, user_input["person_entity_id"], user_input.get("notification_entry_id"))
+                await self.manager.bind_person(self._access_id, user_input["person_entity_id"], user_input.get("notification_entry_id"), clear_notification=user_input.get("clear_notification", False))
                 return self.async_create_entry(title="", data={})
             except AccessError as exc:
                 errors["base"] = "yale_error" if exc.detail else exc.code
@@ -181,6 +219,7 @@ class AccessOptionsFlow(OptionsFlow):
         fields = {vol.Required("person_entity_id"): selector.EntitySelector(selector.EntitySelectorConfig(filter={"domain": "person"}))}
         if phones:
             fields[vol.Optional("notification_entry_id")] = selector.SelectSelector(selector.SelectSelectorConfig(options=phones))
+        fields[vol.Optional("clear_notification", default=False)] = selector.BooleanSelector()
         return self.async_show_form(step_id="person", errors=errors, description_placeholders=placeholders, data_schema=vol.Schema(fields))
 
     async def _details(self, user_input=None, errors=None, detail=None):
@@ -193,9 +232,9 @@ class AccessOptionsFlow(OptionsFlow):
             return await self.async_step_schedule()
         return self.async_show_form(step_id="details", errors=errors or {},
                                    description_placeholders={"error": detail} if detail else {}, data_schema=vol.Schema({
-            vol.Required("name"): selector.TextSelector(),
+            vol.Required("name", default=self._draft.get("name", "")): selector.TextSelector(),
             vol.Required("pin"): selector.TextSelector(selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)),
-            vol.Required("access_type", default="temporary"): selector.SelectSelector(selector.SelectSelectorConfig(
+            vol.Required("access_type", default=self._draft.get("access_type", "temporary")): selector.SelectSelector(selector.SelectSelectorConfig(
                 options=list(ACCESS_TYPES), translation_key="access_type")),
         }))
 
@@ -215,7 +254,8 @@ class AccessOptionsFlow(OptionsFlow):
                       vol.Required("start_time"): selector.TimeSelector(),
                       vol.Required("end_time"): selector.TimeSelector()}
         return self.async_show_form(step_id="schedule", errors=errors or {},
-                                   description_placeholders={"error": detail} if detail else {}, data_schema=vol.Schema(fields))
+                                   description_placeholders={"error": detail} if detail else {},
+                                   data_schema=self.add_suggested_values_to_schema(vol.Schema(fields), self._draft))
 
     async def _apply(self, step_id):
         if self.config_entry.state is not ConfigEntryState.LOADED:
@@ -229,11 +269,10 @@ class AccessOptionsFlow(OptionsFlow):
             else:
                 await self.manager.reconcile(self._access_id, self._draft)
         except AccessError as exc:
+            await self.manager.async_request_refresh()
             errors = {"base": "yale_error" if exc.detail else exc.code}
             if step_id == "schedule":
                 return await self.async_step_schedule(errors=errors, detail=exc.detail)
             return await self._details(errors=errors, detail=exc.detail)
-        finally:
-            await self.manager.async_request_refresh()
         self._draft.clear()
         return self.async_create_entry(title="", data={})

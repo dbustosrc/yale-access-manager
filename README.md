@@ -45,6 +45,11 @@ Open the integration's **Configure/options** button in Devices & services:
   to a Home Assistant person by credential and Yale user IDs. A Companion
   phone is optional for linkage and must belong to that person's HA account
   when selected. Temporary code delivery still requires a linked phone.
+- **Unlink person** removes the local association and phone without changing
+  the Yale credential. Link person can also remove only the existing phone.
+- **End visit** releases a stopped visit while retaining its question cooldown.
+- Editing forms suggest the existing name and schedule, never the existing PIN.
+  Action menus filter accesses according to their current operation and state.
 
 Permanent, temporary and weekly recurring access are supported. Temporary dates
 use Home Assistant's timezone. Recurring times use the lock's timezone in the
@@ -60,7 +65,10 @@ is changed. Keypad activity uses the Yale user ID, never a display-name match.
 If the external credential identity changes, explicitly review and relink it.
 
 Replacement uses **delete then load**, with a brief access interruption. A
-definitively rejected replacement attempts to restore the previous PIN. An
+successful manual replacement restores the previous enabled/disabled state.
+Yale loads the replacement before it can be disabled, so editing a disabled
+credential is not atomic and can briefly activate the new PIN. A definitively
+rejected replacement attempts to restore the previous PIN. An
 ambiguous result is retained as pending instead of replaying writes. Resolve or
 delete pending entries before creating or replacing another access.
 
@@ -79,9 +87,11 @@ automation, and an explicit configured lock `device_id`.
 | `yale_access_manager.cancel_pending_access` | `device_id`, pending `access_id`, original `pin` | Requests deletion for the original partner and clears the journal only after Yale accepts it and a fresh read confirms absence |
 | `yale_access_manager.disable_access` | `device_id`, managed `access_id` | Confirms the PIN is disabled in Yale's API |
 | `yale_access_manager.enable_access` | `device_id`, managed `access_id` | Confirms an unexpired PIN is loaded |
-| `yale_access_manager.bind_person` | `device_id`, managed or external `access_id`, `person_entity_id`, optional `notification_entry_id` | Links stable identifiers without modifying Yale |
-| `yale_access_manager.issue_access` | `device_id`, linked `person_entity_id` | Renews a ten-minute temporary PIN and sends it to the linked Companion phone; returns no PIN |
-| `yale_access_manager.begin_visit` | `device_id`, linked `person_entity_id` | Reserves one question per visit and returns the verified Companion notify service, or `allowed: false` |
+| `yale_access_manager.bind_person` | `device_id`, managed or external `access_id`, `person_entity_id`, optional `notification_entry_id`, `clear_notification` | Links stable identifiers; phone removal cannot be combined with selecting a new phone |
+| `yale_access_manager.unbind_person` | `device_id`, linked managed or external `access_id` | Removes local person/phone linkage without modifying Yale; refuses an active issued lease |
+| `yale_access_manager.issue_access` | `device_id`, linked `person_entity_id`, optional `validity_minutes` (5–30), `language` (en/es) | Renews a temporary PIN and requests phone delivery; returns access ID, expiry, opaque receipt action and notification status, never the PIN |
+| `yale_access_manager.confirm_delivery` | `device_id`, managed `access_id`, current `receipt_action` | Records the recipient's explicit notification-button response; rejects another issuance's correlation ID |
+| `yale_access_manager.begin_visit` | `device_id`, linked `person_entity_id`, optional `cooldown_minutes` (5–120) | Reserves one question per visit and returns the verified Companion notify service, or `allowed: false` |
 | `yale_access_manager.end_visit` | `device_id`, linked `person_entity_id` | Clears the visit after departure; preserves the 30-minute cooldown |
 
 For `temporary`, provide `starts_at` and `ends_at`. For `recurring`, provide
@@ -97,16 +107,33 @@ the lock identity and account association.
 Counts refresh every minute (15 seconds during an issued access) and after management operations. Requests wait
 up to three minutes for Yale's reported loading/removal state.
 
+Each managed guest also receives an **Access state** sensor, an **Access expiry**
+timestamp sensor and an individual **Access** switch. The switch uses the same
+administrator-only actions as manual access management; it does not control the
+physical bolt. External and owner accesses do not receive management switches.
+The state/switch reflects Yale's reported enabled state; programmed schedules
+also determine whether a loaded PIN can be used. A permanent guest has no expiry.
+These guest entities include names and linkage metadata, which can appear in
+Home Assistant history; they never include PINs. Deleted managed guests' entities
+are removed without affecting unrelated entities.
+
+Lock-level **Access problem** and **Last successful synchronization** entities
+remain useful during an outage. Activity becomes unavailable if cloud refresh
+fails. A separate native maintenance timer continues even when the count sensors
+are disabled. Rate-limited requests honor `Retry-After` without replaying writes.
+
 `event.*_access_activity` records guest activity without PIN values. Its events
 include the stable `access_id`, Yale `userID`, linked person entity ID, timestamp
-and event type. It is an activity entity, not a presence tracker; keypad activity
+and event type. `consumed` identifies revocation following observed credential
+use; `expired` identifies expiry cleanup. It is an activity entity, not a presence tracker; keypad activity
 identifies the credential that operated the lock, not the human holding it.
 
 ## On-demand access
 
 Create one managed guest with a temporary PIN, disable it and link it to a person
 and Companion phone in **Configure**. The issuance action replaces the old PIN
-with a random six-digit code valid for ten minutes, then sends it to that phone.
+with a random six-digit code valid for ten minutes by default, then requests its
+delivery to that phone. Validity can be set to 5–30 minutes.
 It refuses a second simultaneous issuance. The Yale user ID and managed
 `access_id` remain stable across replacements. A confirmed Yale keypad unlock
 for that user starts revocation; the expiry is also programmed in Yale and
@@ -134,6 +161,41 @@ Each instance is editable through Home Assistant's automation editor. Keep it
 disabled until the guest linkage, notification delivery and physical keypad
 behavior have been verified. Existing app-created permanent codes must be
 retired separately through Yale.
+
+The blueprint supports a selectable Presence Engine detection event entity,
+English/Spanish notifications and a 5–120 minute minimum question cooldown
+(30 by default). Face identity, confidence, freshness, entrance, phone, closed
+door and Bluetooth locked-state checks remain required. No new helpers are needed.
+An unanswered question releases the visit reservation after two minutes while
+preserving the cooldown; an explicit No keeps the visit silent until departure.
+
+The code notification includes **I received the code**. The blueprint matches
+its opaque action against the current issuance and calls `confirm_delivery`.
+`requested` means the notify service returned; it does not prove delivery.
+`confirmed` means an explicit button response was recorded; `unconfirmed` means
+no response was recorded after two minutes, and `failed` means an exception was
+reported. Lack of confirmation does not establish that delivery failed and does
+not extend the code's validity or disable an otherwise valid code early.
+
+## Troubleshooting
+
+Settings → System → Repairs shows pending operations, changed identities,
+invalid links, cloud/history failures, history continuity gaps and unconfirmed
+code receipt. Repairs gives instructions; it never automatically cancels an
+access or repeats an uncertain write. Use the listing action to inspect operation
+phase, start time, transaction ID and sanitized error details.
+Unlink/relink external identities only after reviewing the credential.
+
+Download diagnostics from the integration menu. Diagnostics include version,
+connectivity, phase/error codes and aggregate linkage information, without PINs,
+guest names, account identities or raw cloud responses.
+
+Activity polling normally reads 50 events. If continuity is missing, it requests
+up to 100; the Yale endpoint returned at most 100 even when larger limits were
+requested during verification. Missing continuity raises a Repairs alert.
+This is bounded recovery, not a guarantee of complete history after a long outage.
+Expiry cleanup runs independently of the activity endpoint. Yale's programmed
+expiry remains the fallback when cloud connectivity or Home Assistant is down.
 
 ## Privacy and persistence
 

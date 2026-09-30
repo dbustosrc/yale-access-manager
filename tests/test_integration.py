@@ -23,9 +23,13 @@ from yale_access_manager.api import YaleAPI, redact_error
 from yale_access_manager.config_flow import AccessOptionsFlow, YaleAccessManagerConfigFlow
 from yale_access_manager.const import DOMAIN, AccessError
 from yale_access_manager.manager import AccessManager
-from yale_access_manager.models import command, matches, records, saved, utc
-from yale_access_manager.sensor import AccessCount
+from yale_access_manager.models import command, matches, records, saved, utc, form_values
+from yale_access_manager.sensor import AccessCount, AccessState, AccessExpiry, LastSync
 from yale_access_manager.event import AccessActivity
+from yale_access_manager.switch import AccessEnabled
+from yale_access_manager.binary_sensor import AccessProblem
+from yale_access_manager.diagnostics import async_get_config_entry_diagnostics
+from yale_access_manager.entity import setup_access_entities
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -36,11 +40,13 @@ TEMP = {"name": "Test Guest", "pin": "012345", "access_type": "temporary",
 class MemoryStore:
     def __init__(self):
         self.data = None
+        self.saves = 0
 
     async def async_load(self):
         return deepcopy(self.data)
 
     async def async_save(self, data):
+        self.saves += 1
         # No raw PIN value or field can reach persistence.
         if '"pin"' in json.dumps(data) or TEMP["pin"] in json.dumps(data):
             raise AssertionError("A PIN reached persistence")
@@ -65,7 +71,7 @@ class SimulatedYale:
     async def detail(self, lock_id):
         return {"supportsEntryCodes": True, "accessSchedulesAllowed": True, "HouseID": "test-house"}
 
-    async def activities(self, house_id):
+    async def activities(self, house_id, *, limit=50):
         return deepcopy(self.events)
 
     async def pins(self, lock_id):
@@ -133,6 +139,9 @@ class ModelChecks(unittest.TestCase):
         self.assertTrue(matches({"state": "loaded", "pin": "123456", "firstName": "Guest", "lastName": None,
                                  "accessType": "always"}, command({"name": "Guest", "pin": "123456", "access_type": "always"}, now=NOW)))
         self.assertEqual(len(records({"loaded": [{}], "updating": [{}]})), 2)
+        self.assertNotIn("pin", form_values(desired))
+        values = form_values(recurring)
+        self.assertEqual((values["weekdays"], values["start_time"], values["end_time"]), (["MO", "FR"], "08:30:00", "17:15:00"))
 
 
 class NativeChecks(unittest.IsolatedAsyncioTestCase):
@@ -140,6 +149,11 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         # This path is never created. The only storage used below is MemoryStore.
         self.hass = HomeAssistant("/__yale_memory_checks__")
         self.hass.config.time_zone = "America/Guayaquil"
+        self.hass.config.language = "es"
+        for name in ("async_create_issue", "async_delete_issue"):
+            replacement = patch("yale_access_manager.manager.ir." + name)
+            replacement.start()
+            self.addCleanup(replacement.stop)
         self.entry = SimpleNamespace(entry_id="manager", unique_id="lock", domain=DOMAIN,
                                      data={"lock_id": "lock", "device_id": "device", "august_entry_id": "source"},
                                      state=ConfigEntryState.LOADED, async_on_unload=lambda callback: None)
@@ -326,6 +340,11 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
             issued = await self.manager.issue_access("person.guest")
             self.assertEqual(issued["access_id"], access_id)
             self.assertNotIn("pin", json.dumps(issued))
+            self.assertEqual(issued["notification_status"], "requested")
+            with self.assertRaises(AccessError):
+                await self.manager.confirm_delivery(access_id, "different-receipt")
+            self.assertEqual(await self.manager.confirm_delivery(access_id, issued["receipt_action"]), {"confirmed": True})
+            self.assertEqual(self.manager.accesses[access_id]["notification_status"], "confirmed")
             self.assertEqual(len(delivered), 1)
             self.assertIn("código", delivered[0]["message"])
             self.assertEqual(self.manager.accesses[access_id]["user_id"], yale_id)
@@ -348,7 +367,8 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AccessError):
                 await self.manager.issue_access("person.guest")
             self.assertEqual(len(delivered), 2)
-            self.assertEqual(self.manager.owned(await self.manager.raw(), access_id)["state"], "disabled")
+            with self.assertRaises(AccessError):
+                self.manager.owned(await self.manager.raw(), access_id)
             self.assertEqual(self.manager.accesses[access_id]["operation"], "unknown")
 
     async def test_external_owner_link_without_phone_preserves_read_only_access(self):
@@ -403,6 +423,10 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AccessError) as result:
                 await self.manager.bind_person(external_id, "person.owner")
             self.assertEqual(result.exception.code, "identity_changed")
+            await self.manager.unbind_person(external_id)
+            self.assertEqual(self.manager.external_links, {})
+            await self.manager.bind_person(external_id, "person.owner")
+            self.assertEqual(self.manager.external_links[external_id]["user_id"], "changed-owner")
 
     async def test_expired_lease_recovered_after_restart_without_replaying_write(self):
         access_id = await self.manager.create(TEMP)
@@ -446,8 +470,10 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_entity_is_not_presence_tracker(self):
         activity = AccessActivity(self.entry)
-        self.assertEqual(activity.event_types[-1], "deleted")
+        self.assertIn("deleted", activity.event_types)
         self.assertEqual(activity.device_info["identifiers"], {("august", "lock")})
+        self.manager.history_error = "cannot_connect"
+        self.assertFalse(activity.available)
 
     async def test_native_admin_services_and_target_validation(self):
         await async_setup(self.hass, {})
@@ -565,6 +591,115 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(sensor.extra_state_attributes)
         self.assertEqual(sensor.device_info["identifiers"], {("august", "lock")})
 
+    async def test_disabled_edit_identity_checks_and_prefilled_forms(self):
+        key = await self.manager.create(TEMP)
+        await self.manager.set_enabled(key, False)
+        flow = AccessOptionsFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "edit-prefill", "manager"
+        form = await flow.async_step_update_access({"access_id": key})
+        values = form["data_schema"]({"pin": "234567"})
+        self.assertEqual((values["name"], values["access_type"]), (TEMP["name"], "temporary"))
+        self.assertNotIn("pin", flow._draft)
+        await self.manager.update(key, {**TEMP, "name": "Renamed Guest", "pin": "234567"})
+        self.assertEqual(self.manager.owned(await self.manager.raw(), key)["state"], "disabled")
+        self.api.entries[-1]["userID"] = "replacement-user"
+        writes = len(self.api.writes)
+        for operation in (self.manager.set_enabled(key, False), self.manager.reconcile(key, {**TEMP, "name": "Renamed Guest", "pin": "234567"})):
+            with self.assertRaises(AccessError) as error:
+                await operation
+            self.assertEqual(error.exception.code, "identity_changed")
+        self.assertEqual(len(self.api.writes), writes)
+
+    async def test_expiry_independent_of_history_and_definitive_disable_rejection(self):
+        key = await self.manager.create(TEMP)
+        start = datetime.now(timezone.utc) - timedelta(minutes=3)
+        self.manager.accesses[key]["lease"] = {"started_at": start.isoformat(), "expires_at": (start + timedelta(minutes=1)).isoformat(), "revoke": False}
+        self.api.activities = AsyncMock(side_effect=AccessError("cannot_connect"))
+        self.api.next_failure = AccessError("rate_limited")
+        await self.manager.maintain()
+        self.assertFalse(self.manager.accesses[key]["lease"]["disable_requested"])
+        await self.manager.maintain()
+        self.assertIsNone(self.manager.accesses[key].get("lease"))
+        self.assertEqual(self.manager.owned(await self.manager.raw(), key)["state"], "disabled")
+        self.assertEqual(self.manager.history_error, "cannot_connect")
+
+    async def test_admin_switch_diagnostics_and_unchanged_store(self):
+        key = await self.manager.create(TEMP)
+        await self.manager.async_refresh()
+        self.assertEqual(AccessState(self.entry, key).native_value, "loaded")
+        self.assertIsNotNone(AccessExpiry(self.entry, key).native_value)
+        self.assertIsNotNone(LastSync(self.entry).native_value)
+        await async_setup(self.hass, {})
+        self.hass.auth = SimpleNamespace(async_get_user=self._get_user)
+        switch = AccessEnabled(self.entry, key)
+        switch.hass = self.hass
+        switch.async_set_context(Context(user_id="guest"))
+        with self.assertRaises(Unauthorized):
+            await switch.async_turn_off()
+        switch.async_set_context(Context(user_id="admin"))
+        await switch.async_turn_off()
+        self.assertFalse(switch.is_on)
+        before = self.store.saves
+        await self.manager.save()
+        await self.manager.save()
+        self.assertEqual(before, self.store.saves)
+        diagnostics = json.dumps(await async_get_config_entry_diagnostics(self.hass, self.entry))
+        for value in (TEMP["pin"], "876543", TEMP["name"], key, self.manager.accesses[key]["user_id"]):
+            self.assertNotIn(value, diagnostics)
+        self.assertFalse(AccessProblem(self.entry).is_on)
+        self.manager.last_error = "cannot_connect"
+        self.assertTrue(AccessProblem(self.entry).is_on)
+
+    async def test_maintenance_timer_without_entity_listeners_and_bounded_history(self):
+        with patch("yale_access_manager.manager.async_track_time_interval") as timer:
+            self.manager.start()
+            self.assertEqual(timer.call_args.args[2], timedelta(seconds=15))
+            self.manager.last_attempt = datetime.now(timezone.utc) - timedelta(seconds=61)
+            with patch.object(self.manager, "async_refresh", AsyncMock()) as refresh:
+                await self.manager._tick(datetime.now(timezone.utc))
+                refresh.assert_awaited_once()
+        key = await self.manager.create(TEMP)
+        self.manager.seen_activities = ["previous-event"]
+        async def history(house, *, limit=50):
+            events = [{"id": str(i)} for i in range(limit)]
+            if limit == 100:
+                events[-1] = {"id": "previous-event"}
+            return events
+        self.api.activities = AsyncMock(side_effect=history)
+        await self.manager.maintain()
+        self.assertEqual(self.api.activities.await_args_list[-1].kwargs, {"limit": 100})
+        self.assertFalse(self.manager.history_gap)
+        self.assertIn("previous-event", self.manager.seen_activities)
+        self.assertEqual(self.manager.accesses[key]["operation"], "ready")
+
+    async def test_dynamic_entities_remove_only_deleted_managed_guest(self):
+        key = await self.manager.create(TEMP)
+        await self.manager.async_refresh()
+        registry_entries = []
+        removed = []
+        def remove(entity_id):
+            removed.append(entity_id)
+            registry_entries[:] = [entry for entry in registry_entries if entry.entity_id != entity_id]
+        registry = SimpleNamespace(async_remove=remove)
+        registry_api = SimpleNamespace(async_get=lambda hass: registry, async_entries_for_config_entry=lambda registry, entry: list(registry_entries))
+        added = []
+        def add(entities):
+            for entity in entities:
+                added.append(entity)
+                registry_entries.append(SimpleNamespace(platform=DOMAIN, domain="sensor", unique_id=entity.unique_id, entity_id=f"sensor.test_{len(added)}"))
+        registry_entries.append(SimpleNamespace(platform="other", domain="sensor", unique_id="other", entity_id="sensor.unrelated"))
+        with patch("yale_access_manager.entity.er", registry_api):
+            setup_access_entities(self.hass, self.entry, add, "sensor", lambda guest: [AccessState(self.entry, guest), AccessExpiry(self.entry, guest)])
+            self.assertEqual(len(added), 2)
+            second = await self.manager.create({**TEMP, "name": "Second Guest", "pin": "234567"})
+            await self.manager.async_refresh()
+            self.assertEqual(len(added), 4)
+            await self.manager.delete(key)
+            await self.manager.async_refresh()
+            self.assertEqual(len(removed), 2)
+            self.assertNotIn("sensor.unrelated", removed)
+            self.assertIn(second, self.manager.accesses)
+
     async def test_native_oauth_refresh_updates_only_source_entry(self):
         source = SimpleNamespace(entry_id="source", state=ConfigEntryState.LOADED,
                                  data={"auth_implementation": "synthetic", "token": {
@@ -588,6 +723,28 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
 
 
 class TransportChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_retry_after_blocks_requests_without_replaying_write(self):
+        class Response:
+            status = 429
+            headers = {"Retry-After": "120"}
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+            async def text(self):
+                return '{"message":"Too many requests"}'
+        source = SimpleNamespace(entry_id="source", state=ConfigEntryState.LOADED)
+        session = SimpleNamespace(request=unittest.mock.Mock(return_value=Response()))
+        oauth = SimpleNamespace(token={"access_token": "synthetic-token"}, async_ensure_token_valid=AsyncMock())
+        hass = SimpleNamespace(config_entries=SimpleNamespace(async_get_entry=lambda key: source))
+        api = YaleAPI(session, oauth, source, hass)
+        for _ in range(2):
+            with self.assertRaises(AccessError) as error:
+                await api.write("lock", {"pin": "123456", "action": "disable"})
+            self.assertEqual(error.exception.code, "rate_limited")
+        self.assertEqual(session.request.call_count, 1)
+        self.assertGreater(api.retry_at - time.monotonic(), 110)
+
     async def test_failure_body_is_not_mistaken_for_accepted_write(self):
         api = YaleAPI(None, SimpleNamespace(token={"access_token": "synthetic-secret-token"}), None, None)
         api.request = AsyncMock(return_value={"status": "failure", "errorName": "ValidationError",
@@ -669,6 +826,23 @@ class TransportChecks(unittest.IsolatedAsyncioTestCase):
 
 
 class PackageChecks(unittest.TestCase):
+    def test_blueprint_uses_native_automation_schema(self):
+        from homeassistant.components.automation.config import PLATFORM_SCHEMA
+        path = "blueprints/automation/yale_access_manager/on_demand_guest.yaml"
+        assets = globals().get("TEST_ASSETS")
+        source = assets[path] if assets else (Path(__file__).resolve().parents[1] / path).read_text(encoding="utf-8")
+        inputs = {"yale_device": "device", "guest_person": "person.guest", "face_identity": "guest-id",
+                  "camera_origin": "front", "detection_area": "entry", "phone_tracker": "device_tracker.phone",
+                  "lock_entity": "lock.test", "door_contact": "binary_sensor.door", "camera_occupancy": "binary_sensor.person",
+                  "detection_entity": "event.detection", "validity_minutes": 10, "cooldown_minutes": 30, "language": "es"}
+        class Loader(yaml.SafeLoader):
+            pass
+        Loader.add_constructor("!input", lambda loader, node: inputs[loader.construct_scalar(node)])
+        blueprint = yaml.load(source, Loader=Loader)
+        self.assertEqual(set(blueprint.pop("blueprint")["input"]), set(inputs))
+        validated = PLATFORM_SCHEMA(blueprint)
+        self.assertEqual(validated["mode"], "parallel")
+
     def test_metadata_and_translation_contract(self):
         assets = globals().get("TEST_ASSETS")
         if assets is None:

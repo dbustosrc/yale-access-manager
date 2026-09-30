@@ -3,6 +3,7 @@
 from homeassistant.components.event import EventEntity
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_LOCK, DOMAIN, EVENT_TYPES
 
@@ -11,13 +12,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([AccessActivity(entry)])
 
 
-class AccessActivity(EventEntity):
+class AccessActivity(CoordinatorEntity, EventEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "access_activity"
     _attr_event_types = list(EVENT_TYPES)
     _attr_icon = "mdi:history"
 
     def __init__(self, entry):
+        super().__init__(entry.runtime_data)
         self.lock_id = entry.data[CONF_LOCK]
         self._attr_unique_id = f"{DOMAIN}_{self.lock_id}_activity"
         self._attr_device_info = {"identifiers": {("august", self.lock_id)}}
@@ -26,6 +28,10 @@ class AccessActivity(EventEntity):
         await super().async_added_to_hass()
         self.async_on_remove(async_dispatcher_connect(
             self.hass, f"{DOMAIN}_{self.lock_id}_activity", self._receive))
+
+    @property
+    def available(self):
+        return super().available and self.coordinator.history_error is None
 
     @callback
     def _receive(self, payload):

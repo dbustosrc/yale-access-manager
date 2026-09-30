@@ -33,6 +33,7 @@ foreach ($file in Get-ChildItem -LiteralPath $component -Recurse -File | Where-O
     $assets[$relative] = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
 }
 $assets['hacs.json'] = Get-Content -LiteralPath (Join-Path $repository 'hacs.json') -Raw -Encoding utf8
+$assets['blueprints/automation/yale_access_manager/on_demand_guest.yaml'] = Get-Content -LiteralPath (Join-Path $repository 'blueprints/automation/yale_access_manager/on_demand_guest.yaml') -Raw -Encoding utf8
 $runner = Get-Content -LiteralPath (Join-Path $repository 'tools\run_checks.py') -Raw -Encoding utf8
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($runner))
 $remoteCommand = "sudo -n docker exec -e PYTHONDONTWRITEBYTECODE=1 -i homeassistant python3 -B -c `"import base64; exec(base64.b64decode('$encoded'))`""

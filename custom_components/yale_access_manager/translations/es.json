@@ -40,7 +40,9 @@
           "disable_access": "Desactivar acceso",
           "enable_access": "Reactivar acceso",
           "bind_person": "Vincular persona",
-          "cancel_pending_access": "Cancelar acceso pendiente"
+          "cancel_pending_access": "Cancelar acceso pendiente",
+          "unbind_person": "Desvincular persona",
+          "end_visit": "Finalizar visita"
         }
       },
       "list_accesses": {
@@ -128,7 +130,22 @@
         "description": "Vincula por identificadores sin cambiar presencia ni accesos en Yale. El teléfono es opcional para vincular y obligatorio para enviar códigos; debe pertenecer a la cuenta de la persona.",
         "data": {
           "person_entity_id": "Persona",
-          "notification_entry_id": "Teléfono Companion"
+          "notification_entry_id": "Teléfono Companion",
+          "clear_notification": "Retirar el teléfono vinculado"
+        }
+      },
+      "unbind_person": {
+        "title": "Desvincular persona",
+        "description": "Retira únicamente la asociación local y el teléfono. No cambia el acceso Yale. No se permite durante un código temporal activo.",
+        "data": {
+          "access_id": "Acceso"
+        }
+      },
+      "end_visit": {
+        "title": "Finalizar visita",
+        "description": "Libera una visita detenida o finalizada. Se conserva el tiempo mínimo entre preguntas.",
+        "data": {
+          "access_id": "Invitado"
         }
       }
     },
@@ -161,7 +178,8 @@
       "cannot_connect": "No se pudieron consultar los accesos en Yale.",
       "no_managed_accesses": "Primero crea un acceso con esta integración.",
       "no_accesses": "Yale no devuelve accesos para vincular.",
-      "no_mobile_app": "Configura un teléfono con Home Assistant Companion."
+      "no_mobile_app": "Configura un teléfono con Home Assistant Companion.",
+      "no_eligible_accesses": "No hay accesos elegibles para esta operación. Consulta su estado en Ver accesos."
     }
   },
   "selector": {
@@ -194,6 +212,22 @@
       },
       "pending": {
         "name": "Operaciones de acceso pendientes"
+      },
+      "last_sync": {
+        "name": "Última sincronización correcta"
+      },
+      "access_status": {
+        "name": "Estado de acceso de {guest}",
+        "state": {
+          "loaded": "Activado",
+          "disabled": "Desactivado",
+          "pending": "Pendiente",
+          "not_found": "Ausente",
+          "identity_changed": "Identidad cambiada"
+        }
+      },
+      "access_expires": {
+        "name": "Vencimiento de acceso de {guest}"
       }
     },
     "event": {
@@ -210,10 +244,22 @@
               "keypad_unlock": "Desbloqueo por PIN",
               "issued": "Código emitido",
               "expired": "Vigencia terminada",
-              "deleted": "Eliminado"
+              "deleted": "Eliminado",
+              "consumed": "Código utilizado",
+              "delivery_confirmed": "Recepción confirmada"
             }
           }
         }
+      }
+    },
+    "binary_sensor": {
+      "access_problem": {
+        "name": "Problema de acceso"
+      }
+    },
+    "switch": {
+      "access_enabled": {
+        "name": "Acceso de {guest}"
       }
     }
   },
@@ -423,12 +469,16 @@
         "notification_entry_id": {
           "name": "Teléfono Companion",
           "description": "Opcional para vincular; necesario para enviar códigos. Registro mobile_app perteneciente a la cuenta de la persona."
+        },
+        "clear_notification": {
+          "name": "Retirar teléfono",
+          "description": "Elimina el teléfono actual. No selecciones otro teléfono al marcar esta opción."
         }
       }
     },
     "issue_access": {
       "name": "Emitir código temporal",
-      "description": "Renueva el PIN por diez minutos y lo envía al teléfono vinculado. Revoca al detectar uso o vencimiento. No devuelve el PIN.",
+      "description": "Renueva un PIN temporal y solicita su envío al teléfono vinculado. Se revoca por uso identificado o vencimiento. La solicitud de envío no confirma entrega.",
       "fields": {
         "device_id": {
           "name": "Cerradura",
@@ -437,6 +487,14 @@
         "person_entity_id": {
           "name": "Persona",
           "description": "Persona vinculada mediante su identificador estable."
+        },
+        "validity_minutes": {
+          "name": "Vigencia en minutos",
+          "description": "De 5 a 30 minutos; por defecto 10."
+        },
+        "language": {
+          "name": "Idioma de notificación",
+          "description": "Español o inglés; por defecto el idioma de Home Assistant."
         }
       }
     },
@@ -460,18 +518,66 @@
     },
     "begin_visit": {
       "name": "Iniciar visita del invitado",
-      "description": "Reserva una pregunta por visita y devuelve el servicio de notificación del teléfono Companion vinculado. Bloquea nuevas preguntas durante 30 minutos.",
+      "description": "Reserva una pregunta por visita y devuelve el servicio de notificación verificado.",
       "fields": {
-        "device_id": {"name": "Cerradura", "description": "La cerradura Yale configurada."},
-        "person_entity_id": {"name": "Persona", "description": "Persona vinculada a un invitado gestionado."}
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "person_entity_id": {
+          "name": "Persona",
+          "description": "Persona vinculada a un invitado gestionado."
+        },
+        "cooldown_minutes": {
+          "name": "Tiempo mínimo entre preguntas",
+          "description": "De 5 a 120 minutos; por defecto 30."
+        }
       }
     },
     "end_visit": {
       "name": "Finalizar visita del invitado",
       "description": "Restablece la visita tras una salida confirmada; conserva la espera de 30 minutos.",
       "fields": {
-        "device_id": {"name": "Cerradura", "description": "La cerradura Yale configurada."},
-        "person_entity_id": {"name": "Persona", "description": "El invitado vinculado que salió."}
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "person_entity_id": {
+          "name": "Persona",
+          "description": "El invitado vinculado que salió."
+        }
+      }
+    },
+    "unbind_person": {
+      "name": "Desvincular persona",
+      "description": "Retira la vinculación local y su teléfono sin escribir en Yale.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID de acceso",
+          "description": "ID gestionado o externo vinculado."
+        }
+      }
+    },
+    "confirm_delivery": {
+      "name": "Confirmar recepción del código",
+      "description": "Registra la respuesta explícita del destinatario al botón de su notificación. Uso mediante automatización con el identificador de la emisión actual.",
+      "fields": {
+        "device_id": {
+          "name": "Cerradura",
+          "description": "La cerradura Yale configurada."
+        },
+        "access_id": {
+          "name": "ID de acceso",
+          "description": "ID gestionado devuelto al emitir el código."
+        },
+        "receipt_action": {
+          "name": "Acción de recepción",
+          "description": "Identificador opaco de la emisión actual; no es el PIN."
+        }
       }
     }
   },
@@ -544,6 +650,36 @@
     },
     "issue_failed": {
       "message": "No se confirmó el envío del código. Se solicitó revocar el acceso; revisa su estado."
+    }
+  },
+  "issues": {
+    "pending_access": {
+      "title": "{lock}: Operación de acceso pendiente",
+      "description": "Consulta Ver accesos. Verifica el PIN y los datos esperados con Resolver operación pendiente, o cancela explícitamente el intento con su PIN original. Las escrituras inciertas no se repiten."
+    },
+    "identity_changed": {
+      "title": "{lock}: Identidad Yale cambiada",
+      "description": "La identidad actual difiere de la guardada. Revisa el acceso antes de modificarlo. Para una vinculación externa, desvincula y vuelve a vincular únicamente tras comprobar la identidad."
+    },
+    "invalid_link": {
+      "title": "{lock}: Vinculación inválida",
+      "description": "Revisa la persona y el teléfono en Vincular persona. Puedes retirar asociaciones obsoletas con Desvincular persona."
+    },
+    "history_unavailable": {
+      "title": "{lock}: Historial Yale no disponible",
+      "description": "El historial no puede consultarse. La limpieza por vencimiento continúa de forma independiente; la caducidad programada en Yale sigue siendo la protección de respaldo."
+    },
+    "history_gap": {
+      "title": "{lock}: Historial incompleto",
+      "description": "No se encontró continuidad en la recuperación de hasta 100 eventos. Revisa el historial Yale para el periodo omitido; no puede garantizarse una trazabilidad completa."
+    },
+    "cloud_unavailable": {
+      "title": "{lock}: Conexión Yale no disponible",
+      "description": "Comprueba Internet y la integración August. Si requiere autenticación, vuelve a autenticar August. No se asume que las operaciones hayan finalizado."
+    },
+    "notification_unconfirmed": {
+      "title": "{lock}: Recepción del código no confirmada",
+      "description": "La notificación no tiene confirmación explícita del destinatario. Solicitar un envío no demuestra la entrega. El código conserva su vencimiento programado."
     }
   }
 }

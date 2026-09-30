@@ -40,7 +40,9 @@
           "disable_access": "Disable access",
           "enable_access": "Enable access",
           "bind_person": "Link person",
-          "cancel_pending_access": "Cancel pending access"
+          "cancel_pending_access": "Cancel pending access",
+          "unbind_person": "Unlink person",
+          "end_visit": "End visit"
         }
       },
       "list_accesses": {
@@ -128,7 +130,22 @@
         "description": "Link by identifiers without changing presence or Yale access. A phone is optional for linking and required for code delivery; it must belong to the person's account.",
         "data": {
           "person_entity_id": "Person",
-          "notification_entry_id": "Companion phone"
+          "notification_entry_id": "Companion phone",
+          "clear_notification": "Remove linked phone"
+        }
+      },
+      "unbind_person": {
+        "title": "Unlink person",
+        "description": "Remove only the local association and phone. Does not change Yale access. Unavailable during an active issued code.",
+        "data": {
+          "access_id": "Access"
+        }
+      },
+      "end_visit": {
+        "title": "End visit",
+        "description": "Release a stopped or completed visit. The minimum question cooldown is preserved.",
+        "data": {
+          "access_id": "Guest"
         }
       }
     },
@@ -161,7 +178,8 @@
       "cannot_connect": "Unable to read accesses from Yale.",
       "no_managed_accesses": "Create an access with this integration first.",
       "no_accesses": "Yale returned no accesses to link.",
-      "no_mobile_app": "Configure a Home Assistant Companion phone."
+      "no_mobile_app": "Configure a Home Assistant Companion phone.",
+      "no_eligible_accesses": "No accesses are eligible for this operation. Check their state in View accesses."
     }
   },
   "selector": {
@@ -194,6 +212,22 @@
       },
       "pending": {
         "name": "Pending access operations"
+      },
+      "last_sync": {
+        "name": "Last successful synchronization"
+      },
+      "access_status": {
+        "name": "{guest} access state",
+        "state": {
+          "loaded": "Enabled",
+          "disabled": "Disabled",
+          "pending": "Pending",
+          "not_found": "Missing",
+          "identity_changed": "Identity changed"
+        }
+      },
+      "access_expires": {
+        "name": "{guest} access expiry"
       }
     },
     "event": {
@@ -210,10 +244,22 @@
               "keypad_unlock": "Keypad unlock",
               "issued": "Code issued",
               "expired": "Validity ended",
-              "deleted": "Deleted"
+              "deleted": "Deleted",
+              "consumed": "Code consumed",
+              "delivery_confirmed": "Receipt confirmed"
             }
           }
         }
+      }
+    },
+    "binary_sensor": {
+      "access_problem": {
+        "name": "Access problem"
+      }
+    },
+    "switch": {
+      "access_enabled": {
+        "name": "{guest} access"
       }
     }
   },
@@ -423,12 +469,16 @@
         "notification_entry_id": {
           "name": "Companion phone",
           "description": "Optional for linking; required for code delivery. mobile_app registration belonging to the person's account."
+        },
+        "clear_notification": {
+          "name": "Remove phone",
+          "description": "Remove the existing phone. Do not select another phone with this option."
         }
       }
     },
     "issue_access": {
       "name": "Issue temporary code",
-      "description": "Renew the PIN for ten minutes and send it to the linked phone. Revoke on identified use or expiry. Never return the PIN.",
+      "description": "Renew a temporary PIN and request delivery to the linked phone. Revoke on identified use or expiry. A send request does not confirm delivery.",
       "fields": {
         "device_id": {
           "name": "Lock",
@@ -437,6 +487,14 @@
         "person_entity_id": {
           "name": "Person",
           "description": "Person linked by its stable identifier."
+        },
+        "validity_minutes": {
+          "name": "Validity in minutes",
+          "description": "5 to 30 minutes; defaults to 10."
+        },
+        "language": {
+          "name": "Notification language",
+          "description": "Spanish or English; defaults to Home Assistant's language."
         }
       }
     },
@@ -460,18 +518,66 @@
     },
     "begin_visit": {
       "name": "Begin guest visit",
-      "description": "Reserve one question for a linked guest's visit and return their verified Companion notification service. A new question is blocked for 30 minutes.",
+      "description": "Reserve one question per visit and return the verified notification service.",
       "fields": {
-        "device_id": {"name": "Lock", "description": "The configured Yale lock."},
-        "person_entity_id": {"name": "Person", "description": "The person linked to one managed guest."}
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "person_entity_id": {
+          "name": "Person",
+          "description": "The person linked to one managed guest."
+        },
+        "cooldown_minutes": {
+          "name": "Minimum question cooldown",
+          "description": "5 to 120 minutes; defaults to 30."
+        }
       }
     },
     "end_visit": {
       "name": "End guest visit",
       "description": "Clear the visit after confirmed departure. The 30-minute question cooldown remains in effect.",
       "fields": {
-        "device_id": {"name": "Lock", "description": "The configured Yale lock."},
-        "person_entity_id": {"name": "Person", "description": "The linked guest who departed."}
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "person_entity_id": {
+          "name": "Person",
+          "description": "The linked guest who departed."
+        }
+      }
+    },
+    "unbind_person": {
+      "name": "Unlink person",
+      "description": "Remove local linkage and phone without writing to Yale.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "A linked managed or external ID."
+        }
+      }
+    },
+    "confirm_delivery": {
+      "name": "Confirm code receipt",
+      "description": "Record the recipient's explicit notification response. Use through an automation with the current issuance correlation ID.",
+      "fields": {
+        "device_id": {
+          "name": "Lock",
+          "description": "The configured Yale lock."
+        },
+        "access_id": {
+          "name": "Access ID",
+          "description": "The managed ID returned by code issuance."
+        },
+        "receipt_action": {
+          "name": "Receipt action",
+          "description": "Opaque correlation ID for the current issuance; not the PIN."
+        }
       }
     }
   },
@@ -544,6 +650,36 @@
     },
     "issue_failed": {
       "message": "Code delivery is unconfirmed. Access revocation was requested; inspect its state."
+    }
+  },
+  "issues": {
+    "pending_access": {
+      "title": "{lock}: Access operation pending",
+      "description": "Open View accesses. Verify the expected PIN and metadata using Resolve pending operation, or explicitly cancel the attempt with its original PIN. Uncertain writes are never replayed."
+    },
+    "identity_changed": {
+      "title": "{lock}: Yale identity changed",
+      "description": "The current identity differs from the saved identity. Review the access before changing it. For an external linkage, unlink and relink only after verifying its identity."
+    },
+    "invalid_link": {
+      "title": "{lock}: Invalid person linkage",
+      "description": "Review the person and phone in Link person. Remove stale associations with Unlink person."
+    },
+    "history_unavailable": {
+      "title": "{lock}: Yale history unavailable",
+      "description": "Activity history cannot be read. Expiry cleanup continues independently; the expiry programmed in Yale remains the fallback protection."
+    },
+    "history_gap": {
+      "title": "{lock}: Incomplete activity history",
+      "description": "Continuity was not found within the bounded recovery of 100 events. Review Yale history for the missing period; complete activity history cannot be guaranteed."
+    },
+    "cloud_unavailable": {
+      "title": "{lock}: Yale connection unavailable",
+      "description": "Check Internet access and the August integration. Reauthenticate August if requested. Operations are not assumed complete."
+    },
+    "notification_unconfirmed": {
+      "title": "{lock}: Code receipt unconfirmed",
+      "description": "The recipient has not explicitly confirmed receipt. Requesting a notification does not prove delivery. The code retains its programmed expiry."
     }
   }
 }

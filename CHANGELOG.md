@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Preserve the final disabled state when replacing a suspended guest and validate the saved Yale identity consistently across management and reconciliation.
+- Run expiry cleanup independently of activity-history failures and entity subscriptions; retain ambiguous writes without replaying them.
+- Add one administrator-controlled switch and state/expiry sensors per managed guest, plus lock-level problem and last-successful-sync diagnostics.
+- Add native Repairs alerts and downloadable allowlisted diagnostics without PINs, guest names or account identifiers.
+- Record operation phases, start times, transaction identifiers and sanitized errors; honor API rate-limit backoff and avoid redundant refreshes and unchanged journal writes.
+- Add unlinking and phone removal, prefilled editing forms, eligible-action filtering and manual visit reset.
+- Distinguish consumed and expired codes; recover up to 100 recent activities and report unconfirmed history continuity.
+- Add explicit code-receipt confirmation, configurable 5–30 minute validity and 5–120 minute question cooldowns, and English/Spanish notifications.
+- Make the blueprint detection entity selectable, recover unanswered questions without extra helpers and validate the blueprint against Home Assistant's automation schema.
+- Test against the minimum supported Home Assistant version and the current stable container.
+
 ## 0.2.5
 
 - Allow linking app-created and owner accesses to a Home Assistant person without granting PIN-management permissions or writing to Yale.

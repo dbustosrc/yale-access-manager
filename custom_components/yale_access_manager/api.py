@@ -3,6 +3,9 @@
 import json
 import logging
 import re
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -48,8 +51,11 @@ class YaleAPI:
         self.hass = hass
         self.brand = Brand.YALE_AUGUST
         self.urls = ApiCommon(self.brand)
+        self.retry_at = 0.0
 
     async def request(self, method: str, path: str, payload: dict | None = None, *, version="0.0.1"):
+        if time.monotonic() < self.retry_at:
+            raise AccessError("rate_limited")
         if (self.hass.config_entries.async_get_entry(self.source.entry_id) is not self.source
                 or self.source.state is not ConfigEntryState.LOADED):
             raise AccessError("source_unavailable")
@@ -86,6 +92,16 @@ class YaleAPI:
                     _LOGGER.error("Yale %s %s: %s", method, endpoint, detail)
                     if status == 401:
                         self.source.async_start_reauth(self.hass)
+                    if status == 429:
+                        value = getattr(response, "headers", {}).get("Retry-After", "60")
+                        try:
+                            delay = float(value)
+                        except (TypeError, ValueError):
+                            try:
+                                delay = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+                            except (TypeError, ValueError, OverflowError):
+                                delay = 60
+                        self.retry_at = time.monotonic() + max(1, min(delay, 86400))
                     code = {401: "source_auth", 403: "access_denied", 429: "rate_limited"}.get(
                         status, "write_rejected" if method == "POST" else "cannot_connect")
                     raise AccessError(code, detail=detail,
@@ -117,8 +133,10 @@ class YaleAPI:
     async def pins(self, lock_id: str) -> dict:
         return await self.request("GET", f"/locks/{quote(lock_id, safe='')}/pins")
 
-    async def activities(self, house_id: str) -> list[dict]:
-        result = await self.request("GET", f"/houses/{quote(house_id, safe='')}/activities?limit=50", version="4.0.0")
+    async def activities(self, house_id: str, *, limit: int = 50) -> list[dict]:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise AccessError("invalid_response")
+        result = await self.request("GET", f"/houses/{quote(house_id, safe='')}/activities?limit={limit}", version="4.0.0")
         events = result.get("events")
         if not isinstance(events, list) or any(not isinstance(item, dict) for item in events):
             raise AccessError("invalid_response")
