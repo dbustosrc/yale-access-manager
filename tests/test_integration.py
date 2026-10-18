@@ -622,6 +622,8 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         key = await self.expired_absent_guest()
         record = self.manager.accesses[key]
         record.update(person_unique_id="linked-person", notification_entry_id="linked-phone")
+        registry = SimpleNamespace(async_get_entity_id=lambda domain, platform, unique_id: "person.guest")
+        self.enterContext(patch("yale_access_manager.manager.er.async_get", return_value=registry))
         identity = {field: record[field] for field in ("partner_id", "user_id", "person_unique_id", "notification_entry_id")}
         baseline = deepcopy(self.api.entries)
         flow = AccessOptionsFlow()
