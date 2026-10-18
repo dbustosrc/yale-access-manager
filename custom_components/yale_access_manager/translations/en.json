@@ -34,7 +34,7 @@
         "menu_options": {
           "list_accesses": "View accesses",
           "create_access": "Create access",
-          "update_access": "Replace access",
+          "update_access": "Replace or renew access",
           "delete_access": "Delete access",
           "reconcile_access": "Resolve pending operation",
           "disable_access": "Disable access",
@@ -50,8 +50,8 @@
         "description": "Name | access type | Yale state | operation | access ID\n\n{accesses}\n\nEntries marked read_only belong to the Yale app or another manager. Press Submit to return to the menu."
       },
       "update_access": {
-        "title": "Choose access to replace",
-        "description": "Only this integration's accesses can be changed. Replacement deletes the previous PIN before loading the new one; a short interruption is expected.",
+        "title": "Choose access to replace or renew",
+        "description": "Only this integration's accesses can be changed. Replacement interrupts an existing PIN briefly. An expired temporary access marked not_found can be renewed with a new PIN and future expiry; select Temporary. Its saved Yale identity must match before renewal is confirmed.",
         "data": {
           "access_id": "Access"
         }
@@ -317,8 +317,8 @@
       }
     },
     "update_access": {
-      "name": "Replace access",
-      "description": "Replace a managed entry's name, PIN and schedule using delete then load. There is a short access interruption. PIN inputs can appear in automation traces.",
+      "name": "Replace or renew access",
+      "description": "Replace a managed entry's name, PIN and schedule, briefly interrupting existing access. Renew an expired, absent temporary PIN with a new temporary schedule and the same managed ID. PIN inputs can appear in automation traces.",
       "fields": {
         "device_id": {
           "name": "Lock",

@@ -150,7 +150,9 @@ class AccessOptionsFlow(OptionsFlow):
                 continue
             if step_id == "disable_access" and item["state"] != "loaded":
                 continue
-            if step_id == "update_access" and (item["state"] not in ("loaded", "disabled") or item["operation"] != "ready" or record.get("lease")):
+            renewable = item["state"] == "not_found" and self.manager.can_renew_expired(item["access_id"])
+            if step_id == "update_access" and ((item["state"] not in ("loaded", "disabled") and not renewable)
+                                             or item["operation"] != "ready" or record.get("lease")):
                 continue
             if step_id == "reconcile_access" and item["operation"] == "ready":
                 continue

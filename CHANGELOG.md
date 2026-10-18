@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Allow renewing a managed temporary access after its schedule expires and Yale stops listing its PIN, through the existing replacement form and action.
+- Preserve the managed ID and person/phone links, require a new temporary schedule, and confirm the saved Yale user identity before reporting success.
+- Keep absent accesses unavailable for direct activation; retain uncertain renewals for inspection without repeating writes, and leave definitively rejected renewals retryable.
+- Clarify renewal in English and Spanish forms and add regression coverage for eligibility, identity checks, rejection and restart recovery.
+
 ## 0.3.0
 
 - Preserve the final disabled state when replacing a suspended guest and validate the saved Yale identity consistently across management and reconciliation.

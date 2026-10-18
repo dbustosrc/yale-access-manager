@@ -32,7 +32,14 @@ Open the integration's **Configure/options** button in Devices & services:
 
 - **View accesses** shows existing guests and their access metadata without PINs.
 - **Create access** asks for a guest name, PIN and access type.
-- **Replace access** changes a managed guest's name, PIN and schedule.
+- **Replace or renew access** changes a managed guest's name, PIN and schedule.
+  If Yale no longer lists an expired temporary PIN (`not_found`), select this
+  action, enter a new PIN and choose **Temporary** with new dates and a future
+  expiry. Renewal reuses the managed ID and person/phone links; it does not delete
+  an absent PIN. The saved Yale user ID must match before success is confirmed.
+  A changed identity or uncertain response leaves the operation pending for
+  inspection without repeating the write. Identity retention after Yale removes
+  an expired PIN still requires confirmation on the physical installation.
 - **Resolve pending operation** verifies the expected PIN and metadata by reading
   Yale, without repeating a write.
 - **Delete access** removes the selected managed entry and waits for confirmation.
@@ -40,7 +47,9 @@ Open the integration's **Configure/options** button in Devices & services:
   ID using its original PIN, even if the attempted load is absent in Yale.
   A rejection keeps the journal pending; it never just erases the record.
 - **Disable/enable access** changes keypad availability while retaining the guest
-  and its Yale user ID. Do not enable an expired temporary schedule.
+  and its Yale user ID. Do not enable an expired temporary schedule. An absent
+  PIN cannot be enabled; renew it first. Renewal of an absent PIN loads it for
+  the new schedule, while replacement of a disabled PIN keeps it disabled.
 - **Link person** connects a managed or app-created access, including an owner,
   to a Home Assistant person by credential and Yale user IDs. A Companion
   phone is optional for linkage and must belong to that person's HA account

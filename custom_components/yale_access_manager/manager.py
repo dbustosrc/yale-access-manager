@@ -387,24 +387,42 @@ class AccessManager(DataUpdateCoordinator[dict]):
             await self._replace(access_id, data)
         await self.async_request_refresh()
 
+    def can_renew_expired(self, access_id: str) -> bool:
+        """An absent PIN is renewable only after its saved temporary schedule expired."""
+        record = self.accesses.get(access_id, {})
+        data = record.get("metadata", {})
+        if (record.get("operation") != "ready" or record.get("lease")
+                or not record.get("user_id") or data.get("accessType") != "temporary"):
+            return False
+        try:
+            fields = dict(part.split("=", 1) for part in data.get("accessTimes", "").split(";") if "=" in part)
+            end = datetime.fromisoformat(fields["DTEND"].replace("Z", "+00:00"))
+            return end.tzinfo is not None and end <= datetime.now(timezone.utc)
+        except (KeyError, TypeError, ValueError):
+            return False
+
     async def _replace(self, access_id: str, data: dict, *, activate: bool = False) -> None:
         self.ensure_idle()
         items = await self.raw()
         pin = self.owned(items, access_id)
-        if pin is None or pin.get("state") not in ("loaded", "disabled"):
+        if ((pin is None and (activate or not self.can_renew_expired(access_id)))
+                or (pin is not None and pin.get("state") not in ("loaded", "disabled"))):
             raise AccessError("operation_pending")
         desired = self.validate(data, items, pin)
-        previous = {**saved(pin), "pin": pin["pin"], "action": "load", "retry": False}
+        if pin is None and desired["accessType"] != "temporary":
+            raise AccessError("invalid_schedule")
+        previous = {**saved(pin), "pin": pin["pin"], "action": "load", "retry": False} if pin else None
         old_metadata = self.accesses[access_id]["metadata"]
         self.accesses[access_id].update(metadata=saved(desired), operation="updating")
-        self.start_operation(access_id, "updating", "loaded" if activate else pin["state"])
+        self.start_operation(access_id, "updating", pin["state"] if pin and not activate else "loaded")
         await self.save()
         try:
-            await self.remove_pin(access_id, pin)
+            if pin is not None:
+                await self.remove_pin(access_id, pin)
             try:
                 await self.load_pin(access_id, desired)
             except AccessError as exc:
-                if not exc.uncertain and exc.code == "write_rejected":
+                if previous is not None and not exc.uncertain and exc.code == "write_rejected":
                     await self.load_pin(access_id, previous)
                     self.accesses[access_id].update(metadata=old_metadata, operation="ready")
                     if pin.get("state") == "disabled":
@@ -413,10 +431,14 @@ class AccessManager(DataUpdateCoordinator[dict]):
                     raise AccessError("update_rolled_back", detail=(f"{exc.detail}\nPrevious access restored." if exc.detail else None)) from None
                 raise
         except AccessError as exc:
-            if exc.code != "update_rolled_back":
+            if previous is None and not exc.uncertain:
+                # No old PIN was removed; a definite refusal leaves the expired record reusable.
+                self.accesses[access_id].update(metadata=old_metadata, operation="ready")
+                await self.save()
+            elif exc.code != "update_rolled_back":
                 await self.failed(access_id, exc)
             raise
-        if pin["state"] == "disabled" and not activate:
+        if pin is not None and pin["state"] == "disabled" and not activate:
             try:
                 await self._activation(access_id, False)
             except AccessError as exc:

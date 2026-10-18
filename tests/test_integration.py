@@ -180,6 +180,14 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
         await self.manager.async_shutdown()
         await self.manager.close()
 
+    async def expired_absent_guest(self):
+        key = await self.manager.create(TEMP)
+        self.manager.accesses[key]["metadata"]["accessTimes"] = (
+            "DTSTART=2000-01-01T15:00:00.000Z;DTEND=2000-01-01T16:00:00.000Z")
+        self.api.entries = [pin for pin in self.api.entries if pin.get("partnerUserID") != "yam-" + key]
+        await self.manager.save()
+        return key
+
     async def test_crud_restart_and_app_access_protection(self):
         baseline = deepcopy(self.api.entries[0])
         access_id = await self.manager.create(TEMP)
@@ -608,6 +616,111 @@ class NativeChecks(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AccessError) as error:
                 await operation
             self.assertEqual(error.exception.code, "identity_changed")
+        self.assertEqual(len(self.api.writes), writes)
+
+    async def test_expired_absent_guest_renewal_preserves_identity_links_and_entities(self):
+        key = await self.expired_absent_guest()
+        record = self.manager.accesses[key]
+        record.update(person_unique_id="linked-person", notification_entry_id="linked-phone")
+        identity = {field: record[field] for field in ("partner_id", "user_id", "person_unique_id", "notification_entry_id")}
+        baseline = deepcopy(self.api.entries)
+        flow = AccessOptionsFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "renew-expired", "manager"
+        form = await flow.async_step_update_access()
+        form["data_schema"]({"access_id": key})
+        self.assertEqual((await flow.async_step_enable_access())["reason"], "no_eligible_accesses")
+        await self.manager.async_refresh()
+        self.assertFalse(AccessEnabled(self.entry, key).available)
+        writes = len(self.api.writes)
+        await flow.async_step_update_access({"access_id": key})
+        await flow.async_step_details({"name": TEMP["name"], "pin": "234567", "access_type": "temporary"})
+        result = await flow.async_step_schedule({"starts_at": TEMP["starts_at"], "ends_at": TEMP["ends_at"]})
+        self.assertEqual(result["data"], {})
+        self.assertEqual([write["action"] for write in self.api.writes[writes:]], ["load"])
+        self.assertEqual({field: record[field] for field in identity}, identity)
+        self.assertEqual(self.api.entries[:-1], baseline)
+        self.assertTrue(AccessEnabled(self.entry, key).available)
+        self.assertTrue(AccessEnabled(self.entry, key).is_on)
+        self.assertEqual(AccessState(self.entry, key).native_value, "loaded")
+        self.assertNotIn("234567", json.dumps(self.store.data))
+
+    async def test_expired_absent_guest_definite_rejection_keeps_renewable_record(self):
+        key = await self.expired_absent_guest()
+        previous = deepcopy(self.manager.accesses[key]["metadata"])
+        self.api.next_failure = AccessError("write_rejected", detail="Yale HTTP 409: rejected renewal")
+        writes = len(self.api.writes)
+        with self.assertRaises(AccessError) as result:
+            await self.manager.update(key, {**TEMP, "pin": "234567"})
+        self.assertEqual(result.exception.detail, "Yale HTTP 409: rejected renewal")
+        self.assertEqual(self.manager.accesses[key]["metadata"], previous)
+        self.assertEqual(self.manager.accesses[key]["operation"], "ready")
+        self.assertEqual([write["action"] for write in self.api.writes[writes:]], ["load"])
+        self.assertTrue(self.manager.can_renew_expired(key))
+        await self.manager.update(key, {**TEMP, "pin": "234567"})
+        self.assertEqual(self.manager.owned(await self.manager.raw(), key)["state"], "loaded")
+
+    async def test_expired_absent_guest_uncertain_load_survives_restart_without_replay(self):
+        key = await self.expired_absent_guest()
+        identity = self.manager.accesses[key]["user_id"]
+        self.api.pending = True
+        with self.assertRaises(AccessError) as result:
+            await self.manager.update(key, {**TEMP, "pin": "234567"})
+        self.assertTrue(result.exception.uncertain)
+        self.assertEqual(self.manager.accesses[key]["operation"], "unknown")
+        restarted = AccessManager(self.hass, self.entry, self.api, store=self.store)
+        try:
+            await restarted.load()
+            writes = len(self.api.writes)
+            with self.assertRaises(AccessError):
+                await restarted.update(key, {**TEMP, "pin": "234567"})
+            self.assertEqual(len(self.api.writes), writes)
+            self.assertEqual(restarted.accesses[key]["user_id"], identity)
+            self.assertNotIn("234567", json.dumps(self.store.data))
+        finally:
+            await restarted.async_shutdown()
+
+    async def test_expired_absent_guest_changed_yale_identity_is_not_adopted(self):
+        key = await self.expired_absent_guest()
+        identity = self.manager.accesses[key]["user_id"]
+        self.api.next_user_id = "unexpected-new-user"
+        writes = len(self.api.writes)
+        with self.assertRaises(AccessError) as result:
+            await self.manager.update(key, {**TEMP, "pin": "234567"})
+        self.assertEqual(result.exception.code, "identity_changed")
+        self.assertTrue(result.exception.uncertain)
+        self.assertEqual(self.manager.accesses[key]["user_id"], identity)
+        self.assertEqual(self.manager.accesses[key]["operation"], "unknown")
+        self.assertEqual([write["action"] for write in self.api.writes[writes:]], ["load"])
+
+    async def test_missing_guest_renewal_rejects_ineligible_records_and_invalid_requests(self):
+        key = await self.expired_absent_guest()
+        record = deepcopy(self.manager.accesses[key])
+        cases = [
+            {**record, "operation": "unknown"},
+            {**record, "lease": {"expires_at": TEMP["ends_at"]}},
+            {**record, "user_id": ""},
+            {**record, "metadata": {**record["metadata"], "accessType": "always"}},
+            {**record, "metadata": saved(command(TEMP))},
+            {**record, "metadata": {**record["metadata"], "accessTimes": "DTEND=invalid"}},
+            {**record, "metadata": {**record["metadata"], "accessTimes": "DTEND=2000-01-01T00:00:00"}},
+        ]
+        writes = len(self.api.writes)
+        flow = AccessOptionsFlow()
+        flow.hass, flow.flow_id, flow.handler = self.hass, "renew-ineligible", "manager"
+        for index, candidate in enumerate(cases):
+            with self.subTest(record=index):
+                self.manager.accesses[key] = candidate
+                self.assertFalse(self.manager.can_renew_expired(key))
+                self.assertEqual((await flow.async_step_update_access())["reason"], "no_eligible_accesses")
+                with self.assertRaises(AccessError):
+                    await self.manager.update(key, TEMP)
+        self.manager.accesses[key] = record
+        for data in ({**TEMP, "pin": "876543"}, {**TEMP, "access_type": "always"},
+                     {**TEMP, "starts_at": "2000-01-01T10:00:00Z", "ends_at": "2000-01-01T11:00:00Z"}):
+            with self.assertRaises(AccessError):
+                await self.manager.update(key, data)
+        with self.assertRaises(AccessError):
+            await self.manager.update("external:external", TEMP)
         self.assertEqual(len(self.api.writes), writes)
 
     async def test_expiry_independent_of_history_and_definitive_disable_rejection(self):

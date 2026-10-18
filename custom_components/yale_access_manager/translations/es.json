@@ -34,7 +34,7 @@
         "menu_options": {
           "list_accesses": "Ver accesos",
           "create_access": "Crear acceso",
-          "update_access": "Reemplazar acceso",
+          "update_access": "Reemplazar o renovar acceso",
           "delete_access": "Eliminar acceso",
           "reconcile_access": "Resolver operación pendiente",
           "disable_access": "Desactivar acceso",
@@ -50,8 +50,8 @@
         "description": "Nombre | tipo | estado Yale | operación | ID de acceso\n\n{accesses}\n\nLos accesos read_only pertenecen a la app Yale u otro administrador. Pulsa Enviar para volver al menú."
       },
       "update_access": {
-        "title": "Elegir acceso para reemplazar",
-        "description": "Solo se modifican accesos de esta integración. Se elimina el PIN anterior antes de cargar el nuevo; habrá una breve interrupción del acceso.",
+        "title": "Elegir acceso para reemplazar o renovar",
+        "description": "Solo se modifican accesos de esta integración. El reemplazo interrumpe brevemente un PIN existente. Un acceso temporal vencido marcado not_found puede renovarse con un PIN y vencimiento nuevos; selecciona Temporal. Se comprobará su identidad Yale guardada antes de confirmar la renovación.",
         "data": {
           "access_id": "Acceso"
         }
@@ -317,8 +317,8 @@
       }
     },
     "update_access": {
-      "name": "Reemplazar acceso",
-      "description": "Reemplaza nombre, PIN y horario mediante eliminación y carga. Habrá una breve interrupción. El PIN puede aparecer en trazas de automatización.",
+      "name": "Reemplazar o renovar acceso",
+      "description": "Reemplaza nombre, PIN y horario de un acceso gestionado, interrumpiendo brevemente el acceso existente. Renueva un PIN temporal vencido y ausente con un horario temporal nuevo y el mismo ID gestionado. El PIN puede aparecer en trazas de automatización.",
       "fields": {
         "device_id": {
           "name": "Cerradura",
